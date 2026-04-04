@@ -7,7 +7,7 @@ import re
 import struct
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Optional
 
 import httpx
 import pytz
@@ -29,9 +29,9 @@ NOTIFY_CHAR = "59da0001-12f4-25a6-7d4f-55961dce4205"
 class PollerStatus:
     name: str
     state: str = "idle"
-    last_success_at: str | None = None
-    last_error_at: str | None = None
-    last_error: str | None = None
+    last_success_at: Optional[str] = None
+    last_error_at: Optional[str] = None
+    last_error: Optional[str] = None
     details: dict[str, Any] = field(default_factory=dict)
 
 
@@ -44,9 +44,9 @@ class StatusRegistry:
         self,
         name: str,
         *,
-        state: str | None = None,
-        error: str | None = None,
-        details: dict[str, Any] | None = None,
+        state: Optional[str] = None,
+        error: Optional[str] = None,
+        details: Optional[dict[str, Any]] = None,
         mark_success: bool = False,
     ) -> None:
         async with self._lock:
@@ -109,7 +109,7 @@ class PowerpalBlePoller:
     async def run(self) -> None:
         await self.statuses.update("ble", state="starting", details={"mac": self.settings.ble_mac})
         while not self._stopped.is_set():
-            client: BleakClient | None = None
+            client: Optional[BleakClient] = None
             try:
                 self._disconnect_event.clear()
                 await self.statuses.update("ble", state="connecting", details={"mac": self.settings.ble_mac})
@@ -281,7 +281,7 @@ class LocalSitePoller:
 
     def _parse_response(self, response: httpx.Response) -> dict[str, Any]:
         body_text = response.text
-        parsed_json: Any | None = None
+        parsed_json: Optional[Any] = None
         if self.settings.local_site_format in {"auto", "json"}:
             try:
                 parsed_json = response.json()
@@ -311,11 +311,11 @@ class LocalSitePoller:
     @staticmethod
     def _extract_value(
         *,
-        parsed_json: Any | None,
+        parsed_json: Optional[Any],
         body_text: str,
         json_path: str,
         regex: str,
-    ) -> float | None:
+    ) -> Optional[float]:
         if json_path and parsed_json is not None:
             current = parsed_json
             for part in json_path.split("."):

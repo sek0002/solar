@@ -6,7 +6,7 @@ from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from threading import Lock
-from typing import Any
+from typing import Any, Optional
 
 
 class Database:
@@ -52,9 +52,9 @@ class Database:
         *,
         source: str,
         observed_at: datetime,
-        grid_usage_watts: float | None,
-        solar_generation_watts: float | None,
-        raw_payload: dict[str, Any] | None = None,
+        grid_usage_watts: Optional[float],
+        solar_generation_watts: Optional[float],
+        raw_payload: Optional[dict[str, Any]] = None,
     ) -> None:
         payload = json.dumps(raw_payload) if raw_payload is not None else None
         with self._lock, self._connect() as connection:

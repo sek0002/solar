@@ -27,7 +27,7 @@ def _env_bool(name: str, default: bool) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
-@dataclass(slots=True)
+@dataclass
 class Settings:
     app_title: str = os.getenv("APP_TITLE", "Solar Monitor")
     database_path: Path = Path(os.getenv("DATABASE_PATH", "data/solar_monitor.db"))
