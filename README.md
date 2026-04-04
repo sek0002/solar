@@ -19,11 +19,19 @@ Copy `.env.example` into your environment and set:
   - `LOCAL_SOLAR_JSON_PATH`
   - `LOCAL_USAGE_REGEX`
   - `LOCAL_SOLAR_REGEX`
+  - or fixed line extraction with optional scaling:
+  - `LOCAL_USAGE_LINE_INDEX`
+  - `LOCAL_SOLAR_LINE_INDEX`
+  - `LOCAL_USAGE_DIVISOR`
+  - `LOCAL_SOLAR_DIVISOR`
+  - `LOCAL_USAGE_MULTIPLIER`
+  - `LOCAL_SOLAR_MULTIPLIER`
 
 Examples:
 
 - JSON: `LOCAL_SOLAR_JSON_PATH=data.production.watts`
 - HTML/JS text: `LOCAL_SOLAR_REGEX=solarGeneration\\D+([0-9.]+)`
+- Line-based page like `/home.cgi`: `LOCAL_SOLAR_LINE_INDEX=10` and `LOCAL_SOLAR_DIVISOR=60`
 
 ## Run locally
 

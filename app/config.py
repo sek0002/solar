@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Optional
 
 from dotenv import load_dotenv
 
@@ -18,6 +19,11 @@ def _env_int(name: str, default: int) -> int:
 def _env_float(name: str, default: float) -> float:
     value = os.getenv(name)
     return float(value) if value else default
+
+
+def _env_optional_int(name: str) -> Optional[int]:
+    value = os.getenv(name)
+    return int(value) if value else None
 
 
 def _env_bool(name: str, default: bool) -> bool:
@@ -48,6 +54,12 @@ class Settings:
     local_solar_json_path: str = os.getenv("LOCAL_SOLAR_JSON_PATH", "")
     local_usage_regex: str = os.getenv("LOCAL_USAGE_REGEX", "")
     local_solar_regex: str = os.getenv("LOCAL_SOLAR_REGEX", "")
+    local_usage_line_index: Optional[int] = _env_optional_int("LOCAL_USAGE_LINE_INDEX")
+    local_solar_line_index: Optional[int] = _env_optional_int("LOCAL_SOLAR_LINE_INDEX")
+    local_usage_divisor: float = _env_float("LOCAL_USAGE_DIVISOR", 1.0)
+    local_solar_divisor: float = _env_float("LOCAL_SOLAR_DIVISOR", 1.0)
+    local_usage_multiplier: float = _env_float("LOCAL_USAGE_MULTIPLIER", 1.0)
+    local_solar_multiplier: float = _env_float("LOCAL_SOLAR_MULTIPLIER", 1.0)
 
     api_default_hours: int = _env_int("API_DEFAULT_HOURS", 24)
     api_max_points: int = _env_int("API_MAX_POINTS", 5000)

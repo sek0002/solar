@@ -1,14 +1,14 @@
 :root {
-  --bg: #f3efe6;
-  --panel: rgba(255, 252, 246, 0.9);
-  --panel-strong: #fff8ef;
-  --text: #1f2a1f;
-  --muted: #5d6a58;
-  --line: rgba(31, 42, 31, 0.12);
-  --accent: #d76b2a;
-  --accent-2: #2f8f6b;
-  --danger: #b53f3f;
-  --shadow: 0 22px 60px rgba(81, 66, 36, 0.12);
+  --bg: #07111d;
+  --panel: rgba(12, 24, 39, 0.9);
+  --panel-strong: rgba(17, 31, 49, 0.96);
+  --text: #edf4ff;
+  --muted: #97abc5;
+  --line: rgba(138, 162, 194, 0.18);
+  --accent: #f08de0;
+  --accent-2: #8ee29d;
+  --danger: #ff7d7d;
+  --shadow: 0 22px 55px rgba(0, 0, 0, 0.32);
 }
 
 * {
@@ -21,9 +21,9 @@ body {
   font-family: "Space Grotesk", sans-serif;
   color: var(--text);
   background:
-    radial-gradient(circle at top left, rgba(215, 107, 42, 0.14), transparent 30%),
-    radial-gradient(circle at top right, rgba(47, 143, 107, 0.14), transparent 28%),
-    linear-gradient(180deg, #f8f3eb 0%, #efe8dc 100%);
+    radial-gradient(circle at top left, rgba(240, 141, 224, 0.12), transparent 30%),
+    radial-gradient(circle at top right, rgba(142, 226, 157, 0.12), transparent 28%),
+    linear-gradient(180deg, #0a1627 0%, #06101b 100%);
 }
 
 .shell {
@@ -74,8 +74,8 @@ h1 {
 .controls,
 .panel {
   background: var(--panel);
-  backdrop-filter: blur(12px);
-  border: 1px solid rgba(255, 255, 255, 0.65);
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(82, 101, 128, 0.35);
   border-radius: 24px;
   box-shadow: var(--shadow);
 }
@@ -179,7 +179,9 @@ select {
 #chart,
 #net-chart {
   width: 100%;
-  min-height: 430px;
+  min-height: 360px;
+  border-radius: 18px;
+  overflow: hidden;
 }
 
 @media (max-width: 900px) {

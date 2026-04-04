@@ -5,6 +5,39 @@ const refreshText = document.querySelector("#last-refresh");
 const chartElement = document.querySelector("#chart");
 const netChartElement = document.querySelector("#net-chart");
 
+const chartTheme = {
+  paper_bgcolor: "rgba(0,0,0,0)",
+  plot_bgcolor: "#0e1a2b",
+  margin: { t: 18, r: 18, b: 44, l: 52 },
+  hovermode: "x unified",
+  hoverlabel: {
+    bgcolor: "rgba(9, 17, 28, 0.96)",
+    bordercolor: "rgba(135, 156, 186, 0.22)",
+    font: { color: "#edf4ff", size: 12 }
+  },
+  xaxis: {
+    title: "",
+    gridcolor: "rgba(124, 147, 180, 0.12)",
+    tickfont: { color: "#97abc5", size: 11 },
+    zeroline: false,
+    linecolor: "rgba(124, 147, 180, 0.18)"
+  },
+  yaxis: {
+    title: "",
+    gridcolor: "rgba(124, 147, 180, 0.14)",
+    tickfont: { color: "#97abc5", size: 11 },
+    zeroline: false,
+    rangemode: "tozero"
+  },
+  legend: {
+    orientation: "h",
+    y: -0.14,
+    x: 0,
+    font: { color: "#c0d0e5", size: 12 },
+    bgcolor: "rgba(0,0,0,0)"
+  }
+};
+
 function formatNumber(value) {
   if (value === null || value === undefined || Number.isNaN(value)) {
     return "n/a";
@@ -52,37 +85,47 @@ function renderChart(items) {
     {
       x: bleGrid.map((item) => item.observed_at),
       y: bleGrid.map((item) => item.grid_usage_watts),
-      mode: "lines+markers",
-      name: "Grid usage (BLE)",
-      marker: { color: "#d76b2a", size: 7 },
-      line: { color: "#d76b2a", width: 2 }
+      mode: "lines",
+      name: "Consumption",
+      line: { color: "#7fb0ff", width: 1.5, shape: "linear" },
+      fill: "tozeroy",
+      fillcolor: "rgba(127, 176, 255, 0.16)"
     },
     {
       x: localGrid.map((item) => item.observed_at),
       y: localGrid.map((item) => item.grid_usage_watts),
-      mode: "lines+markers",
-      name: "Grid usage (local site)",
-      marker: { color: "#7e5bef", size: 7 },
-      line: { color: "#7e5bef", width: 2 }
+      mode: "lines",
+      name: "Site grid",
+      line: { color: "#d98eff", width: 1.15, shape: "linear" },
+      fill: "tozeroy",
+      fillcolor: "rgba(217, 142, 255, 0.08)"
     },
     {
       x: localSolar.map((item) => item.observed_at),
       y: localSolar.map((item) => item.solar_generation_watts),
-      mode: "lines+markers",
-      name: "Solar generation",
-      marker: { color: "#2f8f6b", size: 7 },
-      line: { color: "#2f8f6b", width: 2 }
+      mode: "lines",
+      name: "Generation",
+      line: { color: "#8ee29d", width: 1.45, shape: "linear" },
+      fill: "tozeroy",
+      fillcolor: "rgba(142, 226, 157, 0.15)"
     }
   ];
 
   Plotly.react(chartElement, traces, {
-    paper_bgcolor: "rgba(0,0,0,0)",
-    plot_bgcolor: "rgba(255, 248, 239, 0.65)",
-    margin: { t: 10, r: 10, b: 50, l: 60 },
-    xaxis: { title: "Time", gridcolor: "rgba(31, 42, 31, 0.08)" },
-    yaxis: { title: "Watts", gridcolor: "rgba(31, 42, 31, 0.08)" },
-    legend: { orientation: "h", y: 1.14 }
-  }, { responsive: true });
+    ...chartTheme,
+    title: {
+      text: "Generation / Consumption / Site Grid",
+      font: { color: "#edf4ff", size: 16 }
+    },
+    yaxis: {
+      ...chartTheme.yaxis,
+      title: "Watts"
+    }
+  }, {
+    responsive: true,
+    displaylogo: false,
+    modeBarButtonsToRemove: ["lasso2d", "select2d"]
+  });
 }
 
 function renderNetChart(items) {
@@ -129,29 +172,29 @@ function renderNetChart(items) {
     {
       x: netItems.map((item) => item.observed_at),
       y: netItems.map((item) => item.net_power_watts),
-      mode: "lines+markers",
-      name: "Solar(site) minus grid(BLE)",
-      marker: {
-        color: netItems.map((item) => item.net_power_watts >= 0 ? "#2f8f6b" : "#b53f3f"),
-        size: 7
-      },
-      line: { color: "#315f50", width: 2 },
+      mode: "lines",
+      name: "Export balance",
+      line: { color: "#f08de0", width: 1.4, shape: "linear" },
       fill: "tozeroy",
-      fillcolor: "rgba(47, 143, 107, 0.12)"
+      fillcolor: "rgba(240, 141, 224, 0.18)"
     }
   ], {
-    paper_bgcolor: "rgba(0,0,0,0)",
-    plot_bgcolor: "rgba(255, 248, 239, 0.65)",
-    margin: { t: 10, r: 10, b: 50, l: 60 },
-    xaxis: { title: "Time", gridcolor: "rgba(31, 42, 31, 0.08)" },
-    yaxis: {
-      title: "Net watts",
-      zeroline: true,
-      zerolinecolor: "rgba(31, 42, 31, 0.25)",
-      gridcolor: "rgba(31, 42, 31, 0.08)"
+    ...chartTheme,
+    title: {
+      text: "Export Balance",
+      font: { color: "#edf4ff", size: 16 }
     },
-    legend: { orientation: "h", y: 1.14 }
-  }, { responsive: true });
+    yaxis: {
+      ...chartTheme.yaxis,
+      title: "Solar - grid (W)",
+      zeroline: true,
+      zerolinecolor: "rgba(124, 147, 180, 0.42)"
+    }
+  }, {
+    responsive: true,
+    displaylogo: false,
+    modeBarButtonsToRemove: ["lasso2d", "select2d"]
+  });
 }
 
 async function refresh() {

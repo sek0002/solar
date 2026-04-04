@@ -293,12 +293,18 @@ class LocalSitePoller:
             body_text=body_text,
             json_path=self.settings.local_usage_json_path,
             regex=self.settings.local_usage_regex,
+            line_index=self.settings.local_usage_line_index,
+            divisor=self.settings.local_usage_divisor,
+            multiplier=self.settings.local_usage_multiplier,
         )
         solar_generation = self._extract_value(
             parsed_json=parsed_json,
             body_text=body_text,
             json_path=self.settings.local_solar_json_path,
             regex=self.settings.local_solar_regex,
+            line_index=self.settings.local_solar_line_index,
+            divisor=self.settings.local_solar_divisor,
+            multiplier=self.settings.local_solar_multiplier,
         )
 
         return {
@@ -315,6 +321,9 @@ class LocalSitePoller:
         body_text: str,
         json_path: str,
         regex: str,
+        line_index: Optional[int],
+        divisor: float,
+        multiplier: float,
     ) -> Optional[float]:
         if json_path and parsed_json is not None:
             current = parsed_json
@@ -327,13 +336,19 @@ class LocalSitePoller:
                     current = None
                     break
             if current is not None:
-                return float(current)
+                return (float(current) * multiplier) / divisor
 
         if regex:
             match = re.search(regex, body_text, flags=re.IGNORECASE | re.MULTILINE)
             if match:
                 group = match.group(1) if match.groups() else match.group(0)
-                return float(group)
+                return (float(group) * multiplier) / divisor
+
+        if line_index is not None:
+            lines = body_text.splitlines()
+            if 0 <= line_index < len(lines):
+                value = lines[line_index].strip()
+                return (float(value) * multiplier) / divisor
 
         return None
 
