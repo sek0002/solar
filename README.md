@@ -77,6 +77,8 @@ journalctl -u solar-monitor -f
 
 The browser UI will then be available at [http://raspberrypi.local:8000](http://raspberrypi.local:8000) or `http://<pi-ip>:8000`.
 
+If `pip install -r requirements.txt` hangs or spends a long time building `uvloop` on the Raspberry Pi, use the plain `uvicorn` dependency in this repo. The app does not need `uvicorn[standard]` for the Pi service setup.
+
 ## Service notes
 
 - The included unit file is [deploy/solar-monitor.service](/Users/sekkevin/LocalR/solar/deploy/solar-monitor.service).
