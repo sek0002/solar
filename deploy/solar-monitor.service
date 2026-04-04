@@ -1,0 +1,17 @@
+[Unit]
+Description=Solar Monitor web app
+After=network-online.target bluetooth.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=sek0002
+Group=root
+WorkingDirectory=/opt/solar-monitor
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/solar-monitor/poll_solar.sh
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

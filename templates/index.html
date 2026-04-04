@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{ app_title }}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/styles.css">
+  <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+</head>
+<body>
+  <main class="shell">
+    <section class="hero">
+      <div>
+        <p class="eyebrow">Live energy telemetry</p>
+        <h1>{{ app_title }}</h1>
+        <p class="lede">BLE import from Powerpal plus solar data from your local network source, with reconnect-aware polling and browser charts.</p>
+      </div>
+      <div class="controls">
+        <label for="hours">Window</label>
+        <select id="hours">
+          <option value="1">1 hour</option>
+          <option value="6">6 hours</option>
+          <option value="12">12 hours</option>
+          <option value="24" selected>24 hours</option>
+          <option value="72">3 days</option>
+          <option value="168">7 days</option>
+        </select>
+      </div>
+    </section>
+
+    <section class="grid">
+      <div class="panel">
+        <div class="panel-header">
+          <h2>Collector status</h2>
+          <span id="last-refresh">Loading...</span>
+        </div>
+        <div id="status-cards" class="status-cards">
+          {% for status in statuses %}
+          <article class="status-card">
+            <strong>{{ status.name }}</strong>
+            <span>{{ status.state }}</span>
+          </article>
+          {% endfor %}
+        </div>
+      </div>
+
+      <div class="panel metrics">
+        <div class="panel-header">
+          <h2>Latest values</h2>
+        </div>
+        <div id="latest-values" class="latest-values">
+          {% for sample in latest_samples %}
+          <article class="metric-card">
+            <span>{{ sample.source }}</span>
+            <strong>{{ sample.grid_usage_watts or sample.solar_generation_watts or "n/a" }}</strong>
+          </article>
+          {% endfor %}
+        </div>
+      </div>
+    </section>
+
+    <section class="panel chart-panel">
+      <div class="panel-header">
+        <h2>Power vs time</h2>
+        <span>Each stored datapoint is plotted individually.</span>
+      </div>
+      <div id="chart"></div>
+    </section>
+  </main>
+
+  <script>
+    window.SOLAR_MONITOR_CONFIG = {
+      defaultHours: {{ default_hours }}
+    };
+  </script>
+  <script src="/static/app.js"></script>
+</body>
+</html>

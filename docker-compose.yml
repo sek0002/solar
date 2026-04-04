@@ -1,0 +1,15 @@
+services:
+  solar-monitor:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      APP_TITLE: Solar Monitor
+      DATABASE_PATH: /app/data/solar_monitor.db
+      TIMEZONE: Australia/Melbourne
+      BLE_ENABLED: "false"
+      LOCAL_SITE_ENABLED: "true"
+      LOCAL_SITE_URL: "http://host.docker.internal/"
+      LOCAL_SITE_POLL_SECONDS: "15"
+    volumes:
+      - ./data:/app/data
