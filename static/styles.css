@@ -176,7 +176,8 @@ select {
   padding-bottom: 6px;
 }
 
-#chart {
+#chart,
+#net-chart {
   width: 100%;
   min-height: 430px;
 }
