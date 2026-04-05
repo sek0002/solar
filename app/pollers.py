@@ -5,14 +5,14 @@ import json
 import logging
 import re
 import struct
+import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Optional
 
 import httpx
 import pytz
-from bleak import BleakClient
-from bleak.exc import BleakError
+from bluepy.btle import ADDR_TYPE_RANDOM, BTLEDisconnectError, BTLEException, DefaultDelegate, Peripheral, UUID
 
 from app.config import Settings
 from app.database import Database
@@ -78,14 +78,24 @@ class StatusRegistry:
             ]
 
 
+class _PowerpalNotificationDelegate(DefaultDelegate):
+    def __init__(self, poller: "PowerpalBlePoller") -> None:
+        super().__init__()
+        self._poller = poller
+
+    def handleNotification(self, _: int, data: bytes) -> None:
+        self._poller.handle_notification_bytes(data)
+
+
 class PowerpalBlePoller:
     def __init__(self, settings: Settings, database: Database, statuses: StatusRegistry) -> None:
         self.settings = settings
         self.database = database
         self.statuses = statuses
         self._stopped = asyncio.Event()
-        self._disconnect_event = asyncio.Event()
+        self._stop_requested = threading.Event()
         self._melbourne_tz = pytz.timezone(settings.timezone_name)
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
 
     @staticmethod
     def convert_pairing_code(original_pairing_code: str) -> bytes:
@@ -108,38 +118,21 @@ class PowerpalBlePoller:
 
     async def run(self) -> None:
         await self.statuses.update("ble", state="starting", details={"mac": self.settings.ble_mac})
+        self._loop = asyncio.get_running_loop()
         while not self._stopped.is_set():
-            client: Optional[BleakClient] = None
             try:
-                self._disconnect_event.clear()
+                self._stop_requested.clear()
                 await self.statuses.update("ble", state="connecting", details={"mac": self.settings.ble_mac})
-                client = BleakClient(
-                    self.settings.ble_mac,
-                    disconnected_callback=self._on_disconnect,
-                )
-                await client.connect(timeout=self.settings.ble_connection_timeout_seconds)
-                await client.write_gatt_char(
-                    PAIRING_CODE_CHAR,
-                    self.convert_pairing_code(self.settings.ble_pairing_code),
-                    response=True,
-                )
-                await client.write_gatt_char(POWERPAL_FREQ_CHAR, b"\x01\x00\x00\x00", response=True)
-                await client.start_notify(NOTIFY_CHAR, self._handle_notification)
-                await self.statuses.update("ble", state="connected", mark_success=True)
-                done, pending = await asyncio.wait(
-                    [
-                        asyncio.create_task(self._stopped.wait()),
-                        asyncio.create_task(self._disconnect_event.wait()),
-                    ],
-                    return_when=asyncio.FIRST_COMPLETED,
-                )
-                for task in done:
-                    task.result()
-                for task in pending:
-                    task.cancel()
-                if self._disconnect_event.is_set() and not self._stopped.is_set():
+                await asyncio.to_thread(self._run_session_blocking)
+                if not self._stopped.is_set():
+                    await self.statuses.update(
+                        "ble",
+                        state="disconnected",
+                        error="BLE disconnected",
+                        details={"mac": self.settings.ble_mac},
+                    )
                     await asyncio.sleep(self.settings.ble_retry_delay_seconds)
-            except BleakError as exc:
+            except (BTLEException, BTLEDisconnectError) as exc:
                 LOGGER.warning("BLE error: %s", exc)
                 await self._record_error_fallback(str(exc))
                 await self.statuses.update(
@@ -159,16 +152,33 @@ class PowerpalBlePoller:
                     details={"mac": self.settings.ble_mac},
                 )
                 await asyncio.sleep(self.settings.ble_retry_delay_seconds)
-            finally:
-                if client and client.is_connected:
-                    try:
-                        await client.stop_notify(NOTIFY_CHAR)
-                    except Exception:
-                        LOGGER.debug("Unable to stop notifications cleanly", exc_info=True)
-                    await client.disconnect()
 
     async def stop(self) -> None:
         self._stopped.set()
+        self._stop_requested.set()
+
+    def _run_session_blocking(self) -> None:
+        peripheral: Optional[Peripheral] = None
+        try:
+            peripheral = Peripheral(self.settings.ble_mac, addrType=ADDR_TYPE_RANDOM)
+            peripheral.withDelegate(_PowerpalNotificationDelegate(self))
+
+            pairing_characteristic = peripheral.getCharacteristics(uuid=UUID(PAIRING_CODE_CHAR))[0]
+            frequency_characteristic = peripheral.getCharacteristics(uuid=UUID(POWERPAL_FREQ_CHAR))[0]
+            notify_characteristic = peripheral.getCharacteristics(uuid=UUID(NOTIFY_CHAR))[0]
+
+            pairing_characteristic.write(self.convert_pairing_code(self.settings.ble_pairing_code), withResponse=True)
+            frequency_characteristic.write(b"\x01\x00\x00\x00", withResponse=True)
+            peripheral.writeCharacteristic(notify_characteristic.getHandle() + 1, b"\x01\x00", withResponse=True)
+
+            while not self._stop_requested.is_set():
+                peripheral.waitForNotifications(1.0)
+        finally:
+            if peripheral is not None:
+                try:
+                    peripheral.disconnect()
+                except Exception:
+                    LOGGER.debug("Unable to disconnect bluepy peripheral cleanly", exc_info=True)
 
     async def _record_error_fallback(self, error_message: str) -> None:
         average_grid = self.database.get_recent_average(
@@ -191,21 +201,12 @@ class PowerpalBlePoller:
             },
         )
 
-    def _on_disconnect(self, _: BleakClient) -> None:
-        asyncio.create_task(
-            self.statuses.update(
-                "ble",
-                state="disconnected",
-                error="BLE disconnected",
-                details={"mac": self.settings.ble_mac},
-            )
-        )
-        self._disconnect_event.set()
+    def handle_notification_bytes(self, data: bytes) -> None:
+        if self._loop is None:
+            return
+        asyncio.run_coroutine_threadsafe(self._on_notification(bytearray(data)), self._loop)
 
-    def _handle_notification(self, sender: int, data: bytearray) -> None:
-        asyncio.create_task(self._on_notification(sender, data))
-
-    async def _on_notification(self, _: int, data: bytearray) -> None:
+    async def _on_notification(self, data: bytearray) -> None:
         sample = self._parse_notification(data)
         self.database.insert_sample(
             source="ble",
