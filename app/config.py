@@ -60,6 +60,7 @@ class Settings:
     local_solar_divisor: float = _env_float("LOCAL_SOLAR_DIVISOR", 1.0)
     local_usage_multiplier: float = _env_float("LOCAL_USAGE_MULTIPLIER", 1.0)
     local_solar_multiplier: float = _env_float("LOCAL_SOLAR_MULTIPLIER", 1.0)
+    local_site_zero_on_error: bool = _env_bool("LOCAL_SITE_ZERO_ON_ERROR", True)
 
     api_default_hours: int = _env_int("API_DEFAULT_HOURS", 24)
     api_max_points: int = _env_int("API_MAX_POINTS", 5000)

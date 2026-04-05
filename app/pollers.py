@@ -221,6 +221,7 @@ class LocalSitePoller:
                 try:
                     response = await client.get(self.settings.local_site_url)
                     if response.status_code == 404:
+                        await self._record_error_fallback("HTTP 404 from {url}".format(url=self.settings.local_site_url))
                         await self.statuses.update(
                             "local_site",
                             state="error",
@@ -259,6 +260,7 @@ class LocalSitePoller:
                         },
                     )
                 except httpx.HTTPError as exc:
+                    await self._record_error_fallback(str(exc))
                     await self.statuses.update(
                         "local_site",
                         state="error",
@@ -267,6 +269,7 @@ class LocalSitePoller:
                     )
                 except Exception as exc:
                     LOGGER.exception("Unexpected local site failure")
+                    await self._record_error_fallback(str(exc))
                     await self.statuses.update(
                         "local_site",
                         state="error",
@@ -278,6 +281,26 @@ class LocalSitePoller:
 
     async def stop(self) -> None:
         self._stopped.set()
+
+    async def _record_error_fallback(self, error_message: str) -> None:
+        if not self.settings.local_site_zero_on_error:
+            return
+
+        observed_at = datetime.now(timezone.utc)
+        payload = {
+            "content_type": None,
+            "grid_usage_watts": 0.0,
+            "solar_generation_watts": 0.0,
+            "url": self.settings.local_site_url,
+            "fallback_reason": error_message,
+        }
+        self.database.insert_sample(
+            source="local_site",
+            observed_at=observed_at,
+            grid_usage_watts=0.0,
+            solar_generation_watts=0.0,
+            raw_payload=payload,
+        )
 
     def _parse_response(self, response: httpx.Response) -> dict[str, Any]:
         body_text = response.text
