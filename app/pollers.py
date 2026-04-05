@@ -244,7 +244,10 @@ class LocalSitePoller:
                 try:
                     response = await client.get(self.settings.local_site_url)
                     if response.status_code == 404:
-                        await self._record_error_fallback("HTTP 404 from {url}".format(url=self.settings.local_site_url))
+                        await self._record_error_fallback(
+                            "HTTP 404 from {url}".format(url=self.settings.local_site_url),
+                            average_window=self.settings.local_site_404_average_window,
+                        )
                         await self.statuses.update(
                             "local_site",
                             state="error",
@@ -305,19 +308,20 @@ class LocalSitePoller:
     async def stop(self) -> None:
         self._stopped.set()
 
-    async def _record_error_fallback(self, error_message: str) -> None:
+    async def _record_error_fallback(self, error_message: str, average_window: Optional[int] = None) -> None:
         if not self.settings.local_site_zero_on_error:
             return
 
+        window = average_window or self.settings.failure_average_window
         average_grid = self.database.get_recent_average(
             source="local_site",
             column="grid_usage_watts",
-            count=self.settings.failure_average_window,
+            count=window,
         )
         average_solar = self.database.get_recent_average(
             source="local_site",
             column="solar_generation_watts",
-            count=self.settings.failure_average_window,
+            count=window,
         )
 
         observed_at = datetime.now(timezone.utc)
@@ -328,7 +332,7 @@ class LocalSitePoller:
             "url": self.settings.local_site_url,
             "fallback_reason": error_message,
             "imputed": True,
-            "average_window": self.settings.failure_average_window,
+            "average_window": window,
         }
         self.database.insert_sample(
             source="local_site",
