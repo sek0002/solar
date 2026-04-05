@@ -24,6 +24,18 @@ database = Database(settings.database_path)
 coordinator = PollingCoordinator(settings, database)
 
 
+def _parse_api_datetime(value: Optional[str], fallback: datetime) -> datetime:
+    if not value:
+        return fallback
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return fallback
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     await coordinator.start()
@@ -62,12 +74,11 @@ async def api_samples(
     end: Optional[str] = Query(default=None),
 ) -> dict[str, object]:
     if start or end:
-        end_dt = datetime.fromisoformat(end) if end else datetime.now(timezone.utc)
-        start_dt = datetime.fromisoformat(start) if start else end_dt - timedelta(hours=hours)
-        if start_dt.tzinfo is None:
-            start_dt = start_dt.replace(tzinfo=timezone.utc)
-        if end_dt.tzinfo is None:
-            end_dt = end_dt.replace(tzinfo=timezone.utc)
+        fallback_end = datetime.now(timezone.utc)
+        end_dt = _parse_api_datetime(end, fallback_end)
+        start_dt = _parse_api_datetime(start, end_dt - timedelta(hours=hours))
+        if start_dt > end_dt:
+            start_dt, end_dt = end_dt - timedelta(hours=hours), end_dt
         return {"items": database.get_samples_range(since=start_dt, until=end_dt, limit=limit)}
 
     return {"items": database.get_recent_samples(hours=hours, limit=limit)}

@@ -31,6 +31,48 @@ function buildLocalDateTime(dateValue, timeValue) {
   return new Date(year, (month || 1) - 1, day || 1, hours || 0, minutes || 0, 0, 0);
 }
 
+function formatLocalDate(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function formatLocalTime(date) {
+  const hours = String(date.getHours()).padStart(2, "0");
+  const minutes = String(date.getMinutes()).padStart(2, "0");
+  return `${hours}:${minutes}`;
+}
+
+function clampHours(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return Number(window.SOLAR_MONITOR_CONFIG.defaultHours || 24);
+  }
+  return Math.min(168, Math.max(1, Math.round(numeric)));
+}
+
+function syncWindowControls(hours) {
+  const clampedHours = clampHours(hours);
+  hoursInput.value = clampedHours;
+  windowSlider.value = clampedHours;
+  return clampedHours;
+}
+
+function ensureEndInputs() {
+  if (startDateInput.value && startTimeInput.value) {
+    return;
+  }
+
+  const now = new Date();
+  if (!startDateInput.value) {
+    startDateInput.value = formatLocalDate(now);
+  }
+  if (!startTimeInput.value) {
+    startTimeInput.value = formatLocalTime(now);
+  }
+}
+
 function buildChartTheme() {
   const dark = getTheme() === "dark";
   return {
@@ -480,51 +522,110 @@ function renderCumulativeChart(items) {
   });
 }
 
+function renderEmptyCharts() {
+  const chartTheme = buildChartTheme();
+  const dark = getTheme() === "dark";
+  const emptyAnnotation = {
+    text: "No data in the selected window",
+    showarrow: false,
+    font: { color: dark ? "#97abc5" : "#7a8797", size: 14 },
+    xref: "paper",
+    yref: "paper",
+    x: 0.5,
+    y: 0.5
+  };
+
+  Plotly.react(chartElement, [], {
+    ...chartTheme,
+    annotations: [emptyAnnotation],
+    yaxis: { ...chartTheme.yaxis, title: "Watts" },
+    yaxis2: {
+      title: "kW/hr",
+      overlaying: "y",
+      side: "right",
+      tickfont: { color: dark ? "#97abc5" : "#7a8797", size: 11 },
+      titlefont: { color: dark ? "#97abc5" : "#7a8797" },
+      gridcolor: "rgba(0,0,0,0)",
+      zeroline: false
+    }
+  }, { responsive: true, displaylogo: false, modeBarButtonsToRemove: ["lasso2d", "select2d"] });
+
+  Plotly.react(netChartElement, [], {
+    ...chartTheme,
+    annotations: [emptyAnnotation],
+    yaxis: { ...chartTheme.yaxis, title: "Solar - grid (W)" }
+  }, { responsive: true, displaylogo: false, modeBarButtonsToRemove: ["lasso2d", "select2d"] });
+
+  Plotly.react(cumulativeChartElement, [], {
+    ...chartTheme,
+    annotations: [emptyAnnotation],
+    yaxis: { ...chartTheme.yaxis, title: "kWh" }
+  }, { responsive: true, displaylogo: false, modeBarButtonsToRemove: ["lasso2d", "select2d"] });
+}
+
 async function refresh() {
-  const hours = Number(hoursInput.value || window.SOLAR_MONITOR_CONFIG.defaultHours || 24);
-  const selectedDate = startDateInput.value;
-  const selectedTime = startTimeInput.value || "00:00";
-  const end = buildLocalDateTime(selectedDate, selectedTime);
-  const start = new Date(end.getTime() - hours * 3600000);
-  const [statusResponse, samplesResponse] = await Promise.all([
-    fetch("/api/status"),
-    fetch(`/api/samples?hours=${hours}&start=${encodeURIComponent(start.toISOString())}&end=${encodeURIComponent(end.toISOString())}`)
-  ]);
+  try {
+    ensureEndInputs();
+    const hours = syncWindowControls(hoursInput.value || window.SOLAR_MONITOR_CONFIG.defaultHours || 24);
+    const selectedDate = startDateInput.value;
+    const selectedTime = startTimeInput.value || formatLocalTime(new Date());
+    const end = buildLocalDateTime(selectedDate, selectedTime);
+    const safeEnd = Number.isNaN(end.getTime()) ? new Date() : end;
+    const start = new Date(safeEnd.getTime() - hours * 3600000);
+    const [statusResponse, samplesResponse] = await Promise.all([
+      fetch("/api/status"),
+      fetch(`/api/samples?hours=${hours}&start=${encodeURIComponent(start.toISOString())}&end=${encodeURIComponent(safeEnd.toISOString())}`)
+    ]);
 
-  if (!statusResponse.ok || !samplesResponse.ok) {
+    if (!statusResponse.ok || !samplesResponse.ok) {
+      throw new Error(`HTTP ${statusResponse.status}/${samplesResponse.status}`);
+    }
+
+    const statusPayload = await statusResponse.json();
+    const samplesPayload = await samplesResponse.json();
+    const items = Array.isArray(samplesPayload.items) ? samplesPayload.items : [];
+
+    statusCards.innerHTML = statusPayload.pollers.map(formatStatusCard).join("");
+    latestValues.innerHTML = statusPayload.latest_samples.map(formatMetricCard).join("");
+
+    if (!items.length) {
+      cumulativeStats.innerHTML = [
+        formatStatCard("Solar today", "0.00 kWh", "No samples in the selected window"),
+        formatStatCard("Grid today", "0.00 kWh", "No samples in the selected window"),
+        formatStatCard("Net export today", "0.00 kWh", "No samples in the selected window"),
+        formatStatCard("Estimated polls", "0", "No samples in the selected window")
+      ].join("");
+      renderEmptyCharts();
+      refreshText.textContent = "No data in selected window";
+      return;
+    }
+
+    renderCumulativeStats(items);
+    renderChart(items);
+    renderNetChart(items);
+    renderCumulativeChart(items);
+    refreshText.textContent = `Updated ${new Date().toLocaleTimeString()}`;
+  } catch (error) {
+    console.error("Refresh failed", error);
+    renderEmptyCharts();
     refreshText.textContent = "Refresh failed";
-    return;
   }
-
-  const statusPayload = await statusResponse.json();
-  const samplesPayload = await samplesResponse.json();
-
-  statusCards.innerHTML = statusPayload.pollers.map(formatStatusCard).join("");
-  latestValues.innerHTML = statusPayload.latest_samples.map(formatMetricCard).join("");
-  renderCumulativeStats(samplesPayload.items);
-  renderChart(samplesPayload.items);
-  renderNetChart(samplesPayload.items);
-  renderCumulativeChart(samplesPayload.items);
-  refreshText.textContent = `Updated ${new Date().toLocaleTimeString()}`;
 }
 
 const storedTheme = localStorage.getItem("solar-monitor-theme");
 setTheme(storedTheme || "light");
-if (!startDateInput.value) {
-  const now = new Date();
-  startDateInput.value = now.toISOString().slice(0, 10);
-  startTimeInput.value = now.toTimeString().slice(0, 5);
-}
+ensureEndInputs();
+syncWindowControls(hoursInput.value || window.SOLAR_MONITOR_CONFIG.defaultHours || 24);
 themeToggle.addEventListener("click", () => {
   setTheme(getTheme() === "dark" ? "light" : "dark");
   refresh();
 });
 windowSlider.addEventListener("input", () => {
-  hoursInput.value = windowSlider.value;
+  syncWindowControls(windowSlider.value);
   refresh();
 });
 hoursInput.addEventListener("input", () => {
-  windowSlider.value = hoursInput.value;
+  syncWindowControls(hoursInput.value);
   refresh();
 });
 startDateInput.addEventListener("change", refresh);
