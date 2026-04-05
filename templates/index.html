@@ -36,37 +36,36 @@
       <span id="last-refresh" class="last-refresh">Loading...</span>
     </section>
 
-    <section class="panel chart-panel" data-chart-panel>
-      <div class="panel-header">
-        <div>
-          <h2>Power vs time</h2>
-          <span>Rate traces in W/min with matching kW/hr scale on the right axis.</span>
+    <section class="charts-grid">
+      <section class="panel chart-panel">
+        <div class="panel-header">
+          <div>
+            <h2>Power vs time</h2>
+            <span>Rate traces in W/min with matching kW/hr scale on the right axis.</span>
+          </div>
         </div>
-        <button class="chart-toggle" type="button" data-chart-toggle aria-expanded="false">Expand</button>
-      </div>
-      <div id="chart"></div>
-    </section>
+        <div id="chart"></div>
+      </section>
 
-    <section class="panel chart-panel" data-chart-panel>
-      <div class="panel-header">
-        <div>
-          <h2>Net solar minus grid</h2>
-          <span>Net rate in W/min with matching kW/hr scale on the right axis.</span>
+      <section class="panel chart-panel">
+        <div class="panel-header">
+          <div>
+            <h2>Net solar minus grid</h2>
+            <span>Net rate in W/min with matching kW/hr scale on the right axis.</span>
+          </div>
         </div>
-        <button class="chart-toggle" type="button" data-chart-toggle aria-expanded="false">Expand</button>
-      </div>
-      <div id="net-chart"></div>
-    </section>
+        <div id="net-chart"></div>
+      </section>
 
-    <section class="panel chart-panel" data-chart-panel>
-      <div class="panel-header">
-        <div>
-          <h2>Cumulative energy</h2>
-          <span>Daily cumulative kWh reset at Melbourne midnight.</span>
+      <section class="panel chart-panel chart-panel-wide">
+        <div class="panel-header">
+          <div>
+            <h2>Cumulative energy</h2>
+            <span>Daily cumulative kWh reset at Melbourne midnight.</span>
+          </div>
         </div>
-        <button class="chart-toggle" type="button" data-chart-toggle aria-expanded="false">Expand</button>
-      </div>
-      <div id="cumulative-chart"></div>
+        <div id="cumulative-chart"></div>
+      </section>
     </section>
 
     <section class="grid">

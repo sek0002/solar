@@ -54,7 +54,8 @@ body {
 }
 
 .topbar,
-.grid {
+.grid,
+.charts-grid {
   display: grid;
   gap: 20px;
 }
@@ -159,26 +160,14 @@ input[type="range"] {
   margin-bottom: 18px;
 }
 
-.panel-header > div {
-  display: grid;
-  gap: 4px;
-}
-
 .panel-header span {
   color: var(--muted);
   font-size: 0.92rem;
 }
 
-.chart-toggle {
-  border: 1px solid var(--line);
-  background: var(--panel-strong);
-  color: var(--text);
-  border-radius: 999px;
-  padding: 8px 12px;
-  font: inherit;
-  font-size: 0.88rem;
-  cursor: pointer;
-  white-space: nowrap;
+.panel-header > div {
+  display: grid;
+  gap: 4px;
 }
 
 .status-cards,
@@ -272,31 +261,29 @@ input[type="range"] {
 
 .chart-panel {
   padding-bottom: 6px;
-  transition: transform 160ms ease, box-shadow 160ms ease;
 }
 
-.chart-panel.expanded {
-  transform: translateY(-2px);
+.charts-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-bottom: 20px;
+}
+
+.chart-panel-wide {
+  grid-column: 1 / -1;
 }
 
 #chart,
 #net-chart,
 #cumulative-chart {
   width: 100%;
-  height: 220px;
+  height: 420px;
   border-radius: 18px;
   overflow: hidden;
-  transition: height 180ms ease;
-}
-
-.chart-panel.expanded #chart,
-.chart-panel.expanded #net-chart,
-.chart-panel.expanded #cumulative-chart {
-  height: 460px;
 }
 
 @media (max-width: 900px) {
-  .grid {
+  .grid,
+  .charts-grid {
     grid-template-columns: 1fr;
   }
 
@@ -307,15 +294,6 @@ input[type="range"] {
   .controls-inline {
     flex-direction: column;
     align-items: stretch;
-  }
-
-  .panel-header {
-    flex-direction: column;
-    align-items: stretch;
-  }
-
-  .chart-toggle {
-    align-self: flex-start;
   }
 
   .shell {
