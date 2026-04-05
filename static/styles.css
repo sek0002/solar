@@ -1,4 +1,4 @@
-:root {
+[data-theme="light"] {
   --bg: #eef3fa;
   --panel: rgba(255, 255, 255, 0.94);
   --panel-strong: #ffffff;
@@ -11,19 +11,41 @@
   --shadow: 0 18px 45px rgba(89, 108, 138, 0.11);
 }
 
+[data-theme="dark"] {
+  --bg: #0a1220;
+  --panel: rgba(14, 23, 39, 0.92);
+  --panel-strong: rgba(20, 31, 49, 0.96);
+  --text: #edf4ff;
+  --muted: #97abc5;
+  --line: rgba(138, 162, 194, 0.18);
+  --accent: #f08de0;
+  --accent-2: #8ee29d;
+  --danger: #ff8e8e;
+  --shadow: 0 20px 48px rgba(0, 0, 0, 0.34);
+}
+
+:root {
+  color-scheme: light;
+}
+
+[data-theme="dark"] {
+  color-scheme: dark;
+}
+
 * {
   box-sizing: border-box;
 }
 
+html,
 body {
   margin: 0;
   min-height: 100vh;
   font-family: "Space Grotesk", sans-serif;
   color: var(--text);
   background:
-    radial-gradient(circle at top left, rgba(218, 120, 198, 0.1), transparent 30%),
-    radial-gradient(circle at top right, rgba(124, 201, 138, 0.12), transparent 28%),
-    linear-gradient(180deg, #f8fbff 0%, #edf3fb 100%);
+    radial-gradient(circle at top left, color-mix(in srgb, var(--accent) 18%, transparent), transparent 30%),
+    radial-gradient(circle at top right, color-mix(in srgb, var(--accent-2) 18%, transparent), transparent 28%),
+    linear-gradient(180deg, color-mix(in srgb, var(--bg) 75%, white) 0%, var(--bg) 100%);
 }
 
 .shell {
@@ -31,61 +53,61 @@ body {
   margin: 32px auto 48px;
 }
 
-.hero,
+.topbar,
 .grid {
   display: grid;
   gap: 20px;
 }
 
-.hero {
+.topbar {
   grid-template-columns: 1fr auto;
-  align-items: end;
+  align-items: center;
   margin-bottom: 20px;
 }
 
-.eyebrow {
-  margin: 0 0 8px;
-  text-transform: uppercase;
-  letter-spacing: 0.14em;
-  color: var(--accent-2);
-  font-size: 0.8rem;
-  font-weight: 700;
-}
-
-h1,
 h2,
-p {
+p,
+label {
   margin: 0;
-}
-
-h1 {
-  font-size: clamp(2.4rem, 5vw, 4.5rem);
-  line-height: 0.92;
-  max-width: 10ch;
-}
-
-.lede {
-  margin-top: 16px;
-  max-width: 60ch;
-  color: var(--muted);
-  font-size: 1rem;
 }
 
 .controls,
 .panel {
   background: var(--panel);
   backdrop-filter: blur(8px);
-  border: 1px solid rgba(215, 224, 236, 0.78);
+  border: 1px solid var(--line);
   border-radius: 24px;
   box-shadow: var(--shadow);
 }
 
+.controls-inline {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
 .controls {
-  padding: 18px;
+  padding: 14px 16px;
   display: flex;
   flex-direction: column;
   gap: 10px;
-  min-width: 170px;
+  min-width: 160px;
+}
+
+.theme-toggle {
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--text);
+  border-radius: 16px;
+  padding: 12px 16px;
+  font: inherit;
+  cursor: pointer;
+  box-shadow: var(--shadow);
+}
+
+.last-refresh {
+  color: var(--muted);
+  font-size: 0.92rem;
 }
 
 select {
@@ -95,6 +117,7 @@ select {
   border: 1px solid var(--line);
   background: var(--panel-strong);
   font: inherit;
+  color: var(--text);
 }
 
 .grid {
@@ -120,13 +143,19 @@ select {
 }
 
 .status-cards,
-.latest-values {
+.latest-values,
+.stats-grid {
   display: grid;
   gap: 14px;
 }
 
+.stats-grid {
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
 .status-card,
-.metric-card {
+.metric-card,
+.stat-card {
   display: grid;
   gap: 8px;
   padding: 16px;
@@ -136,16 +165,46 @@ select {
 }
 
 .status-card strong,
-.metric-card strong {
+.metric-card strong,
+.stat-card strong {
   font-size: 1.1rem;
 }
 
 .status-card small,
 .metric-card small,
+.stat-card small,
 .status-card code {
   color: var(--muted);
   font-family: inherit;
   word-break: break-word;
+}
+
+.status-card summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.status-card summary::-webkit-details-marker {
+  display: none;
+}
+
+.status-card-body {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.status-minimal {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 8px;
 }
 
 .status-pill {
@@ -177,7 +236,8 @@ select {
 }
 
 #chart,
-#net-chart {
+#net-chart,
+#cumulative-chart {
   width: 100%;
   min-height: 360px;
   border-radius: 18px;
@@ -188,6 +248,15 @@ select {
   .hero,
   .grid {
     grid-template-columns: 1fr;
+  }
+
+  .topbar {
+    grid-template-columns: 1fr;
+  }
+
+  .controls-inline {
+    flex-direction: column;
+    align-items: stretch;
   }
 
   .shell {

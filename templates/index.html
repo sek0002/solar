@@ -12,37 +12,63 @@
 </head>
 <body>
   <main class="shell">
-    <section class="hero">
-      <div>
-        <p class="eyebrow">Live energy telemetry</p>
-        <h1>{{ app_title }}</h1>
-        <p class="lede">BLE import from Powerpal plus solar data from your local network source, with reconnect-aware polling and browser charts.</p>
+    <section class="topbar">
+      <div class="controls-inline">
+        <div class="controls">
+          <label for="hours">Window</label>
+          <select id="hours">
+            <option value="1">1 hour</option>
+            <option value="6">6 hours</option>
+            <option value="12">12 hours</option>
+            <option value="24" selected>24 hours</option>
+            <option value="72">3 days</option>
+            <option value="168">7 days</option>
+          </select>
+        </div>
+        <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Toggle dark mode">
+          Dark mode
+        </button>
       </div>
-      <div class="controls">
-        <label for="hours">Window</label>
-        <select id="hours">
-          <option value="1">1 hour</option>
-          <option value="6">6 hours</option>
-          <option value="12">12 hours</option>
-          <option value="24" selected>24 hours</option>
-          <option value="72">3 days</option>
-          <option value="168">7 days</option>
-        </select>
+      <span id="last-refresh" class="last-refresh">Loading...</span>
+    </section>
+
+    <section class="panel chart-panel">
+      <div class="panel-header">
+        <h2>Power vs time</h2>
+        <span>Each stored datapoint is plotted individually.</span>
       </div>
+      <div id="chart"></div>
+    </section>
+
+    <section class="panel chart-panel">
+      <div class="panel-header">
+        <h2>Net solar minus grid</h2>
+        <span>Solar comes from the local site, and grid usage comes from BLE, aligned by time.</span>
+      </div>
+      <div id="net-chart"></div>
+    </section>
+
+    <section class="panel chart-panel">
+      <div class="panel-header">
+        <h2>Cumulative energy and change rate</h2>
+        <span>Left axis shows W/min. Right axis shows cumulative kWh.</span>
+      </div>
+      <div id="cumulative-chart"></div>
     </section>
 
     <section class="grid">
       <div class="panel">
         <div class="panel-header">
           <h2>Collector status</h2>
-          <span id="last-refresh">Loading...</span>
         </div>
         <div id="status-cards" class="status-cards">
           {% for status in statuses %}
-          <article class="status-card">
-            <strong>{{ status.name }}</strong>
-            <span>{{ status.state }}</span>
-          </article>
+          <details class="status-card">
+            <summary>
+              <strong>{{ status.name }}</strong>
+              <span>{{ status.state }}</span>
+            </summary>
+          </details>
           {% endfor %}
         </div>
       </div>
@@ -62,20 +88,12 @@
       </div>
     </section>
 
-    <section class="panel chart-panel">
+    <section class="panel">
       <div class="panel-header">
-        <h2>Power vs time</h2>
-        <span>Each stored datapoint is plotted individually.</span>
+        <h2>Cumulative stats</h2>
+        <span>Integrated over the visible time window.</span>
       </div>
-      <div id="chart"></div>
-    </section>
-
-    <section class="panel chart-panel">
-      <div class="panel-header">
-        <h2>Net solar minus grid</h2>
-        <span>Solar comes from the local site, and grid usage comes from BLE, aligned by time.</span>
-      </div>
-      <div id="net-chart"></div>
+      <div id="cumulative-stats" class="stats-grid"></div>
     </section>
   </main>
 

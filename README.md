@@ -32,7 +32,9 @@ Examples:
 - JSON: `LOCAL_SOLAR_JSON_PATH=data.production.watts`
 - HTML/JS text: `LOCAL_SOLAR_REGEX=solarGeneration\\D+([0-9.]+)`
 - Line-based page like `/home.cgi`: `LOCAL_SOLAR_LINE_INDEX=10` and `LOCAL_SOLAR_DIVISOR=60`
-- Script-style fallback zeros on fetch/parse failure: `LOCAL_SITE_ZERO_ON_ERROR=true`
+- Script-style fallback on fetch/parse failure now uses the average of the previous three values by default:
+  - `LOCAL_SITE_ZERO_ON_ERROR=true`
+  - `FAILURE_AVERAGE_WINDOW=3`
 
 ## Run locally
 

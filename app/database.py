@@ -130,3 +130,31 @@ class Database:
             }
             for row in rows
         ]
+
+    def get_recent_average(
+        self,
+        *,
+        source: str,
+        column: str,
+        count: int,
+    ) -> Optional[float]:
+        if column not in {"grid_usage_watts", "solar_generation_watts"}:
+            raise ValueError(f"Unsupported average column: {column}")
+
+        with self._connect() as connection:
+            rows = connection.execute(
+                f"""
+                SELECT {column} AS value
+                FROM samples
+                WHERE source = ?
+                  AND {column} IS NOT NULL
+                ORDER BY observed_at DESC
+                LIMIT ?
+                """,
+                (source, count),
+            ).fetchall()
+
+        values = [float(row["value"]) for row in rows if row["value"] is not None]
+        if not values:
+            return None
+        return sum(values) / len(values)

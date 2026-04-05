@@ -141,6 +141,7 @@ class PowerpalBlePoller:
                     await asyncio.sleep(self.settings.ble_retry_delay_seconds)
             except BleakError as exc:
                 LOGGER.warning("BLE error: %s", exc)
+                await self._record_error_fallback(str(exc))
                 await self.statuses.update(
                     "ble",
                     state="error",
@@ -150,6 +151,7 @@ class PowerpalBlePoller:
                 await asyncio.sleep(self.settings.ble_retry_delay_seconds)
             except Exception as exc:
                 LOGGER.exception("Unexpected BLE failure")
+                await self._record_error_fallback(str(exc))
                 await self.statuses.update(
                     "ble",
                     state="error",
@@ -167,6 +169,27 @@ class PowerpalBlePoller:
 
     async def stop(self) -> None:
         self._stopped.set()
+
+    async def _record_error_fallback(self, error_message: str) -> None:
+        average_grid = self.database.get_recent_average(
+            source="ble",
+            column="grid_usage_watts",
+            count=self.settings.failure_average_window,
+        )
+        if average_grid is None:
+            average_grid = 0.0
+
+        self.database.insert_sample(
+            source="ble",
+            observed_at=datetime.now(timezone.utc),
+            grid_usage_watts=average_grid,
+            solar_generation_watts=None,
+            raw_payload={
+                "imputed": True,
+                "fallback_reason": error_message,
+                "average_window": self.settings.failure_average_window,
+            },
+        )
 
     def _on_disconnect(self, _: BleakClient) -> None:
         asyncio.create_task(
@@ -286,19 +309,32 @@ class LocalSitePoller:
         if not self.settings.local_site_zero_on_error:
             return
 
+        average_grid = self.database.get_recent_average(
+            source="local_site",
+            column="grid_usage_watts",
+            count=self.settings.failure_average_window,
+        )
+        average_solar = self.database.get_recent_average(
+            source="local_site",
+            column="solar_generation_watts",
+            count=self.settings.failure_average_window,
+        )
+
         observed_at = datetime.now(timezone.utc)
         payload = {
             "content_type": None,
-            "grid_usage_watts": 0.0,
-            "solar_generation_watts": 0.0,
+            "grid_usage_watts": average_grid if average_grid is not None else 0.0,
+            "solar_generation_watts": average_solar if average_solar is not None else 0.0,
             "url": self.settings.local_site_url,
             "fallback_reason": error_message,
+            "imputed": True,
+            "average_window": self.settings.failure_average_window,
         }
         self.database.insert_sample(
             source="local_site",
             observed_at=observed_at,
-            grid_usage_watts=0.0,
-            solar_generation_watts=0.0,
+            grid_usage_watts=payload["grid_usage_watts"],
+            solar_generation_watts=payload["solar_generation_watts"],
             raw_payload=payload,
         )
 
