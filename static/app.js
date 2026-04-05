@@ -10,6 +10,7 @@ const themeToggle = document.querySelector("#theme-toggle");
 const chartElement = document.querySelector("#chart");
 const netChartElement = document.querySelector("#net-chart");
 const cumulativeChartElement = document.querySelector("#cumulative-chart");
+const chartToggles = document.querySelectorAll("[data-chart-toggle]");
 const appTimezone = window.SOLAR_MONITOR_CONFIG.timezoneName || "Australia/Melbourne";
 
 function getZonedParts(dateLike) {
@@ -172,6 +173,31 @@ function buildNowLine() {
   };
 }
 
+function getChartHeight(element) {
+  const panel = element ? element.closest("[data-chart-panel]") : null;
+  return panel && panel.classList.contains("expanded") ? 460 : 220;
+}
+
+function resizeCharts() {
+  [chartElement, netChartElement, cumulativeChartElement].forEach((element) => {
+    if (element) {
+      Plotly.Plots.resize(element);
+    }
+  });
+}
+
+function toggleChartPanel(button) {
+  const panel = button.closest("[data-chart-panel]");
+  if (!panel) {
+    return;
+  }
+
+  const expanded = panel.classList.toggle("expanded");
+  button.setAttribute("aria-expanded", expanded ? "true" : "false");
+  button.textContent = expanded ? "Compact" : "Expand";
+  window.setTimeout(resizeCharts, 190);
+}
+
 function formatStatusCard(item) {
   const details = Object.entries(item.details || {})
     .map(([key, value]) => {
@@ -185,7 +211,7 @@ function formatStatusCard(item) {
     : "";
 
   return `
-    <details class="status-card">
+    <details class="status-card" data-status-name="${item.name}">
       <summary>
         <strong>${item.name}</strong>
         <span class="status-pill status-${item.state}">${item.state}</span>
@@ -201,6 +227,24 @@ function formatStatusCard(item) {
       </div>
     </details>
   `;
+}
+
+function getExpandedStatusNames() {
+  return new Set(
+    Array.from(statusCards.querySelectorAll(".status-card[open]"))
+      .map((element) => element.dataset.statusName)
+      .filter(Boolean)
+  );
+}
+
+function renderStatusCards(items) {
+  const expandedNames = getExpandedStatusNames();
+  statusCards.innerHTML = items.map((item) => formatStatusCard(item)).join("");
+  statusCards.querySelectorAll(".status-card").forEach((element) => {
+    if (expandedNames.has(element.dataset.statusName)) {
+      element.open = true;
+    }
+  });
 }
 
 function formatMetricCard(item) {
@@ -420,6 +464,7 @@ function renderChart(items) {
 
   Plotly.react(chartElement, traces, {
     ...chartTheme,
+    height: getChartHeight(chartElement),
     shapes: [buildNowLine()],
     title: {
       text: "Generation / Consumption / Site Grid",
@@ -479,6 +524,7 @@ function renderNetChart(items) {
     }
   ], {
     ...chartTheme,
+    height: getChartHeight(netChartElement),
     shapes: [buildNowLine()],
     title: {
       text: "Export Balance",
@@ -557,6 +603,7 @@ function renderCumulativeChart(items) {
     }
   ], {
     ...chartTheme,
+    height: getChartHeight(cumulativeChartElement),
     shapes: [buildNowLine()],
     title: {
       text: "Cumulative energy",
@@ -589,6 +636,7 @@ function renderEmptyCharts() {
 
   Plotly.react(chartElement, [], {
     ...chartTheme,
+    height: getChartHeight(chartElement),
     shapes: [buildNowLine()],
     annotations: [emptyAnnotation],
     yaxis: { ...chartTheme.yaxis, title: "W/min" },
@@ -605,6 +653,7 @@ function renderEmptyCharts() {
 
   Plotly.react(netChartElement, [], {
     ...chartTheme,
+    height: getChartHeight(netChartElement),
     shapes: [buildNowLine()],
     annotations: [emptyAnnotation],
     yaxis: { ...chartTheme.yaxis, title: "Solar - grid (W/min)" },
@@ -621,6 +670,7 @@ function renderEmptyCharts() {
 
   Plotly.react(cumulativeChartElement, [], {
     ...chartTheme,
+    height: getChartHeight(cumulativeChartElement),
     shapes: [buildNowLine()],
     annotations: [emptyAnnotation],
     yaxis: { ...chartTheme.yaxis, title: "kWh" }
@@ -649,7 +699,7 @@ async function refresh() {
     const samplesPayload = await samplesResponse.json();
     const items = Array.isArray(samplesPayload.items) ? samplesPayload.items : [];
 
-    statusCards.innerHTML = statusPayload.pollers.map(formatStatusCard).join("");
+    renderStatusCards(statusPayload.pollers);
     latestValues.innerHTML = statusPayload.latest_samples.map(formatMetricCard).join("");
 
     if (!items.length) {
@@ -713,5 +763,9 @@ startDateInput.addEventListener("change", () => scheduleRefresh(0));
 startTimeInput.addEventListener("change", () => scheduleRefresh(0));
 startDateInput.addEventListener("input", () => scheduleRefresh());
 startTimeInput.addEventListener("input", () => scheduleRefresh());
+chartToggles.forEach((button) => {
+  button.addEventListener("click", () => toggleChartPanel(button));
+});
+window.addEventListener("resize", resizeCharts);
 refresh();
 setInterval(refresh, 10000);

@@ -36,26 +36,35 @@
       <span id="last-refresh" class="last-refresh">Loading...</span>
     </section>
 
-    <section class="panel chart-panel">
+    <section class="panel chart-panel" data-chart-panel>
       <div class="panel-header">
-        <h2>Power vs time</h2>
-        <span>Rate traces in W/min with matching kW/hr scale on the right axis.</span>
+        <div>
+          <h2>Power vs time</h2>
+          <span>Rate traces in W/min with matching kW/hr scale on the right axis.</span>
+        </div>
+        <button class="chart-toggle" type="button" data-chart-toggle aria-expanded="false">Expand</button>
       </div>
       <div id="chart"></div>
     </section>
 
-    <section class="panel chart-panel">
+    <section class="panel chart-panel" data-chart-panel>
       <div class="panel-header">
-        <h2>Net solar minus grid</h2>
-        <span>Net rate in W/min with matching kW/hr scale on the right axis.</span>
+        <div>
+          <h2>Net solar minus grid</h2>
+          <span>Net rate in W/min with matching kW/hr scale on the right axis.</span>
+        </div>
+        <button class="chart-toggle" type="button" data-chart-toggle aria-expanded="false">Expand</button>
       </div>
       <div id="net-chart"></div>
     </section>
 
-    <section class="panel chart-panel">
+    <section class="panel chart-panel" data-chart-panel>
       <div class="panel-header">
-        <h2>Cumulative energy</h2>
-        <span>Daily cumulative kWh reset at Melbourne midnight.</span>
+        <div>
+          <h2>Cumulative energy</h2>
+          <span>Daily cumulative kWh reset at Melbourne midnight.</span>
+        </div>
+        <button class="chart-toggle" type="button" data-chart-toggle aria-expanded="false">Expand</button>
       </div>
       <div id="cumulative-chart"></div>
     </section>
@@ -67,7 +76,7 @@
         </div>
         <div id="status-cards" class="status-cards">
           {% for status in statuses %}
-          <details class="status-card">
+          <details class="status-card" data-status-name="{{ status.name }}">
             <summary>
               <strong>{{ status.name }}</strong>
               <span>{{ status.state }}</span>
