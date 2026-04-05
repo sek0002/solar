@@ -150,6 +150,28 @@ function formatDateTime(dateLike) {
   return new Date(dateLike).toLocaleString("en-AU", { timeZone: appTimezone });
 }
 
+function buildRateHoverTemplate(label) {
+  return `<b>${label}</b><br>%{x}<br>%{y:.1f} W/min<br>%{customdata:.3f} kW/hr<extra></extra>`;
+}
+
+function buildNowLine() {
+  const dark = getTheme() === "dark";
+  return {
+    type: "line",
+    xref: "x",
+    yref: "paper",
+    x0: new Date().toISOString(),
+    x1: new Date().toISOString(),
+    y0: 0,
+    y1: 1,
+    line: {
+      color: dark ? "#ff6b6b" : "#d62828",
+      width: 2,
+      dash: "dash"
+    }
+  };
+}
+
 function formatStatusCard(item) {
   const details = Object.entries(item.details || {})
     .map(([key, value]) => {
@@ -337,11 +359,13 @@ function renderChart(items) {
     {
       x: bleGrid.map((item) => item.observed_at),
       y: bleGrid.map((item) => item.grid_usage_watts),
+      customdata: bleGrid.map((item) => ratePerMinuteToKwPerHour(item.grid_usage_watts)),
       mode: "lines",
       name: "Consumption",
       line: { color: dark ? "#7fb0ff" : "#6f96d8", width: 1.5, shape: "linear" },
       fill: "tozeroy",
-      fillcolor: dark ? "rgba(127, 176, 255, 0.16)" : "rgba(111, 150, 216, 0.17)"
+      fillcolor: dark ? "rgba(127, 176, 255, 0.16)" : "rgba(111, 150, 216, 0.17)",
+      hovertemplate: buildRateHoverTemplate("Consumption")
     },
     {
       x: bleGridRate.map((item) => item.observed_at),
@@ -355,11 +379,13 @@ function renderChart(items) {
     {
       x: localGrid.map((item) => item.observed_at),
       y: localGrid.map((item) => item.grid_usage_watts),
+      customdata: localGrid.map((item) => ratePerMinuteToKwPerHour(item.grid_usage_watts)),
       mode: "lines",
       name: "Site grid",
       line: { color: dark ? "#d98eff" : "#b57adf", width: 1.15, shape: "linear" },
       fill: "tozeroy",
-      fillcolor: dark ? "rgba(217, 142, 255, 0.08)" : "rgba(181, 122, 223, 0.08)"
+      fillcolor: dark ? "rgba(217, 142, 255, 0.08)" : "rgba(181, 122, 223, 0.08)",
+      hovertemplate: buildRateHoverTemplate("Site grid")
     },
     {
       x: localGridRate.map((item) => item.observed_at),
@@ -373,11 +399,13 @@ function renderChart(items) {
     {
       x: localSolar.map((item) => item.observed_at),
       y: localSolar.map((item) => item.solar_generation_watts),
+      customdata: localSolar.map((item) => ratePerMinuteToKwPerHour(item.solar_generation_watts)),
       mode: "lines",
       name: "Generation",
       line: { color: dark ? "#8ee29d" : "#7cc98a", width: 1.45, shape: "linear" },
       fill: "tozeroy",
-      fillcolor: dark ? "rgba(142, 226, 157, 0.15)" : "rgba(124, 201, 138, 0.14)"
+      fillcolor: dark ? "rgba(142, 226, 157, 0.15)" : "rgba(124, 201, 138, 0.14)",
+      hovertemplate: buildRateHoverTemplate("Generation")
     },
     {
       x: localSolarRate.map((item) => item.observed_at),
@@ -392,6 +420,7 @@ function renderChart(items) {
 
   Plotly.react(chartElement, traces, {
     ...chartTheme,
+    shapes: [buildNowLine()],
     title: {
       text: "Generation / Consumption / Site Grid",
       font: { color: dark ? "#edf4ff" : "#263445", size: 16 }
@@ -426,11 +455,13 @@ function renderNetChart(items) {
     {
       x: netItems.map((item) => item.observed_at),
       y: netItems.map((item) => item.net_power_watts),
+      customdata: netItems.map((item) => ratePerMinuteToKwPerHour(item.net_power_watts)),
       mode: "lines",
       name: "Export balance",
       line: { color: dark ? "#f08de0" : "#da78c6", width: 1.4, shape: "linear" },
       fill: "tozeroy",
-      fillcolor: dark ? "rgba(240, 141, 224, 0.18)" : "rgba(218, 120, 198, 0.16)"
+      fillcolor: dark ? "rgba(240, 141, 224, 0.18)" : "rgba(218, 120, 198, 0.16)",
+      hovertemplate: buildRateHoverTemplate("Export balance")
     },
     {
       x: netRamp.map((item) => item.observed_at),
@@ -448,6 +479,7 @@ function renderNetChart(items) {
     }
   ], {
     ...chartTheme,
+    shapes: [buildNowLine()],
     title: {
       text: "Export Balance",
       font: { color: dark ? "#edf4ff" : "#263445", size: 16 }
@@ -525,6 +557,7 @@ function renderCumulativeChart(items) {
     }
   ], {
     ...chartTheme,
+    shapes: [buildNowLine()],
     title: {
       text: "Cumulative energy",
       font: { color: dark ? "#edf4ff" : "#263445", size: 16 }
@@ -556,6 +589,7 @@ function renderEmptyCharts() {
 
   Plotly.react(chartElement, [], {
     ...chartTheme,
+    shapes: [buildNowLine()],
     annotations: [emptyAnnotation],
     yaxis: { ...chartTheme.yaxis, title: "W/min" },
     yaxis2: {
@@ -571,6 +605,7 @@ function renderEmptyCharts() {
 
   Plotly.react(netChartElement, [], {
     ...chartTheme,
+    shapes: [buildNowLine()],
     annotations: [emptyAnnotation],
     yaxis: { ...chartTheme.yaxis, title: "Solar - grid (W/min)" },
     yaxis2: {
@@ -586,6 +621,7 @@ function renderEmptyCharts() {
 
   Plotly.react(cumulativeChartElement, [], {
     ...chartTheme,
+    shapes: [buildNowLine()],
     annotations: [emptyAnnotation],
     yaxis: { ...chartTheme.yaxis, title: "kWh" }
   }, { responsive: true, displaylogo: false, modeBarButtonsToRemove: ["lasso2d", "select2d"] });
@@ -640,6 +676,19 @@ async function refresh() {
   }
 }
 
+let pendingRefresh = null;
+
+function scheduleRefresh(delay = 150) {
+  if (pendingRefresh) {
+    window.clearTimeout(pendingRefresh);
+  }
+
+  pendingRefresh = window.setTimeout(() => {
+    pendingRefresh = null;
+    refresh();
+  }, delay);
+}
+
 const storedTheme = localStorage.getItem("solar-monitor-theme");
 setTheme(storedTheme || "light");
 ensureEndInputs();
@@ -650,15 +699,19 @@ themeToggle.addEventListener("click", () => {
 });
 windowSlider.addEventListener("input", () => {
   syncWindowControls(windowSlider.value);
-  refresh();
+  scheduleRefresh(0);
 });
 hoursInput.addEventListener("input", () => {
   syncWindowControls(hoursInput.value);
-  refresh();
+  scheduleRefresh();
 });
-startDateInput.addEventListener("change", refresh);
-startTimeInput.addEventListener("change", refresh);
-startDateInput.addEventListener("input", refresh);
-startTimeInput.addEventListener("input", refresh);
+hoursInput.addEventListener("change", () => {
+  syncWindowControls(hoursInput.value);
+  scheduleRefresh(0);
+});
+startDateInput.addEventListener("change", () => scheduleRefresh(0));
+startTimeInput.addEventListener("change", () => scheduleRefresh(0));
+startDateInput.addEventListener("input", () => scheduleRefresh());
+startTimeInput.addEventListener("input", () => scheduleRefresh());
 refresh();
 setInterval(refresh, 10000);
