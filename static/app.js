@@ -59,7 +59,7 @@ function setTheme(theme) {
   themeToggle.textContent = theme === "dark" ? "Light mode" : "Dark mode";
 }
 
-function buildLocalDateTime(dateValue, timeValue) {
+function buildLocalDateTime(dateValue, timeValue = "00:00") {
   if (!dateValue) {
     return new Date();
   }
@@ -72,11 +72,6 @@ function buildLocalDateTime(dateValue, timeValue) {
 function formatLocalDate(date) {
   const parts = getZonedParts(date);
   return `${parts.year}-${parts.month}-${parts.day}`;
-}
-
-function formatLocalTime(date) {
-  const parts = getZonedParts(date);
-  return `${parts.hour}:${parts.minute}`;
 }
 
 function clampHours(value) {
@@ -101,25 +96,25 @@ function syncWindowControls(hours) {
   return clampedHours;
 }
 
-function ensureEndInputs() {
-  if (startDateInput.value && startTimeInput.value) {
+function ensureStartInputs() {
+  if (startDateInput.value) {
+    if (!startTimeInput.value) {
+      startTimeInput.value = "00:00";
+    }
     return;
   }
 
   const now = new Date();
-  if (!startDateInput.value) {
-    startDateInput.value = formatLocalDate(now);
-  }
-  if (!startTimeInput.value) {
-    startTimeInput.value = formatLocalTime(now);
-  }
+  const start = new Date(now.getTime() - clampHours(hoursInput.value || window.SOLAR_MONITOR_CONFIG.defaultHours || 24) * 3600000);
+  startDateInput.value = formatLocalDate(start);
+  startTimeInput.value = `${String(start.getHours()).padStart(2, "0")}:${String(start.getMinutes()).padStart(2, "0")}`;
 }
 
 function persistDateTimeControls() {
   updateUiState((state) => {
     state.controls = state.controls || {};
-    state.controls.endDate = startDateInput.value || "";
-    state.controls.endTime = startTimeInput.value || "";
+    state.controls.startDate = startDateInput.value || "";
+    state.controls.startTime = startTimeInput.value || "";
   });
 }
 
@@ -381,11 +376,19 @@ function captureChartState(element, chartKey) {
 
 function formatMetricCard(item) {
   const isImputed = item.raw_payload && item.raw_payload.imputed;
+  const formatConvertedRate = (value) => {
+    if (value === null || value === undefined || Number.isNaN(value)) {
+      return "n/a";
+    }
+    return `${ratePerMinuteToKwPerHour(value).toFixed(3)} kW/hr`;
+  };
   return `
     <article class="metric-card">
       <span>${item.source}</span>
       <strong>Grid: ${formatNumber(item.grid_usage_watts)}</strong>
+      <small>Grid conversion: ${formatConvertedRate(item.grid_usage_watts)}</small>
       <strong>Solar: ${formatNumber(item.solar_generation_watts)}</strong>
+      <small>Solar conversion: ${formatConvertedRate(item.solar_generation_watts)}</small>
       <small>${isImputed ? "Estimated from previous readings" : "Live reading"}</small>
       <small>${formatDateTime(item.observed_at)}</small>
     </article>
@@ -836,16 +839,16 @@ function renderEmptyCharts() {
 
 async function refresh() {
   try {
-    ensureEndInputs();
+    ensureStartInputs();
     const hours = syncWindowControls(hoursInput.value || window.SOLAR_MONITOR_CONFIG.defaultHours || 24);
     const selectedDate = startDateInput.value;
-    const selectedTime = startTimeInput.value || formatLocalTime(new Date());
-    const end = buildLocalDateTime(selectedDate, selectedTime);
-    const safeEnd = Number.isNaN(end.getTime()) ? new Date() : end;
-    const start = new Date(safeEnd.getTime() - hours * 3600000);
+    const selectedTime = startTimeInput.value || "00:00";
+    const start = buildLocalDateTime(selectedDate, selectedTime);
+    const safeStart = Number.isNaN(start.getTime()) ? new Date() : start;
+    const end = new Date(safeStart.getTime() + hours * 3600000);
     const [statusResponse, samplesResponse] = await Promise.all([
       fetch("/api/status"),
-      fetch(`/api/samples?hours=${hours}&start=${encodeURIComponent(start.toISOString())}&end=${encodeURIComponent(safeEnd.toISOString())}`)
+      fetch(`/api/samples?hours=${hours}&start=${encodeURIComponent(safeStart.toISOString())}&end=${encodeURIComponent(end.toISOString())}`)
     ]);
 
     if (!statusResponse.ok || !samplesResponse.ok) {
@@ -898,13 +901,13 @@ function scheduleRefresh(delay = 150) {
 
 const storedTheme = localStorage.getItem("solar-monitor-theme");
 setTheme(storedTheme || "light");
-if (uiState.controls && uiState.controls.endDate) {
-  startDateInput.value = uiState.controls.endDate;
+if (uiState.controls && uiState.controls.startDate) {
+  startDateInput.value = uiState.controls.startDate;
 }
-if (uiState.controls && uiState.controls.endTime) {
-  startTimeInput.value = uiState.controls.endTime;
+if (uiState.controls && uiState.controls.startTime) {
+  startTimeInput.value = uiState.controls.startTime;
 }
-ensureEndInputs();
+ensureStartInputs();
 syncWindowControls((uiState.controls && uiState.controls.hours) || hoursInput.value || window.SOLAR_MONITOR_CONFIG.defaultHours || 24);
 persistDateTimeControls();
 Array.from(statusCards.querySelectorAll(".status-card")).forEach((element) => {
@@ -931,18 +934,18 @@ hoursInput.addEventListener("change", () => {
   syncWindowControls(hoursInput.value);
   scheduleRefresh(0);
 });
-startDateInput.addEventListener("change", () => scheduleRefresh(0));
-startTimeInput.addEventListener("change", () => scheduleRefresh(0));
 startDateInput.addEventListener("input", () => {
   persistDateTimeControls();
   scheduleRefresh();
 });
+startDateInput.addEventListener("change", persistDateTimeControls);
+startDateInput.addEventListener("change", () => scheduleRefresh(0));
 startTimeInput.addEventListener("input", () => {
   persistDateTimeControls();
   scheduleRefresh();
 });
-startDateInput.addEventListener("change", persistDateTimeControls);
 startTimeInput.addEventListener("change", persistDateTimeControls);
+startTimeInput.addEventListener("change", () => scheduleRefresh(0));
 window.addEventListener("resize", resizeCharts);
 refresh();
 setInterval(refresh, 10000);
