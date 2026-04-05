@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import logging
 from contextlib import asynccontextmanager
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Optional
 
 from fastapi import FastAPI, Query, Request
 from fastapi.responses import HTMLResponse
@@ -56,7 +58,18 @@ async def index(request: Request) -> HTMLResponse:
 async def api_samples(
     hours: int = Query(default=settings.api_default_hours, ge=1, le=24 * 30),
     limit: int = Query(default=settings.api_max_points, ge=1, le=20000),
+    start: Optional[str] = Query(default=None),
+    end: Optional[str] = Query(default=None),
 ) -> dict[str, object]:
+    if start or end:
+        end_dt = datetime.fromisoformat(end) if end else datetime.now(timezone.utc)
+        start_dt = datetime.fromisoformat(start) if start else end_dt - timedelta(hours=hours)
+        if start_dt.tzinfo is None:
+            start_dt = start_dt.replace(tzinfo=timezone.utc)
+        if end_dt.tzinfo is None:
+            end_dt = end_dt.replace(tzinfo=timezone.utc)
+        return {"items": database.get_samples_range(since=start_dt, until=end_dt, limit=limit)}
+
     return {"items": database.get_recent_samples(hours=hours, limit=limit)}
 
 

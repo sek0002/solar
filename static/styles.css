@@ -94,6 +94,13 @@ label {
   min-width: 160px;
 }
 
+.window-readout,
+.datetime-controls {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
 .theme-toggle {
   border: 1px solid var(--line);
   background: var(--panel);
@@ -118,6 +125,21 @@ select {
   background: var(--panel-strong);
   font: inherit;
   color: var(--text);
+}
+
+input[type="number"],
+input[type="date"],
+input[type="time"] {
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: var(--panel-strong);
+  font: inherit;
+  color: var(--text);
+}
+
+input[type="range"] {
+  width: 100%;
 }
 
 .grid {

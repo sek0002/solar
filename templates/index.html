@@ -16,14 +16,18 @@
       <div class="controls-inline">
         <div class="controls">
           <label for="hours">Window</label>
-          <select id="hours">
-            <option value="1">1 hour</option>
-            <option value="6">6 hours</option>
-            <option value="12">12 hours</option>
-            <option value="24" selected>24 hours</option>
-            <option value="72">3 days</option>
-            <option value="168">7 days</option>
-          </select>
+          <input id="window-slider" type="range" min="1" max="168" value="24" step="1">
+          <div class="window-readout">
+            <input id="hours" type="number" min="1" max="168" step="1" value="24">
+            <span>hours</span>
+          </div>
+        </div>
+        <div class="controls">
+          <label for="start-date">Start</label>
+          <div class="datetime-controls">
+            <input id="start-date" type="date">
+            <input id="start-time" type="time" step="60">
+          </div>
         </div>
         <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Toggle dark mode">
           Dark mode
@@ -35,7 +39,7 @@
     <section class="panel chart-panel">
       <div class="panel-header">
         <h2>Power vs time</h2>
-        <span>Each stored datapoint is plotted individually.</span>
+        <span>Power traces with change rate overlay on the right axis.</span>
       </div>
       <div id="chart"></div>
     </section>
@@ -43,15 +47,15 @@
     <section class="panel chart-panel">
       <div class="panel-header">
         <h2>Net solar minus grid</h2>
-        <span>Solar comes from the local site, and grid usage comes from BLE, aligned by time.</span>
+        <span>Net watts with change rate overlays in W/min and kW/hr.</span>
       </div>
       <div id="net-chart"></div>
     </section>
 
     <section class="panel chart-panel">
       <div class="panel-header">
-        <h2>Cumulative energy and change rate</h2>
-        <span>Left axis shows W/min. Right axis shows cumulative kWh.</span>
+        <h2>Cumulative energy</h2>
+        <span>Daily cumulative kWh that resets at local midnight.</span>
       </div>
       <div id="cumulative-chart"></div>
     </section>
@@ -91,7 +95,7 @@
     <section class="panel">
       <div class="panel-header">
         <h2>Cumulative stats</h2>
-        <span>Integrated over the visible time window.</span>
+        <span>Day totals that reset at local midnight.</span>
       </div>
       <div id="cumulative-stats" class="stats-grid"></div>
     </section>

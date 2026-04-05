@@ -79,16 +79,30 @@ class Database:
 
     def get_recent_samples(self, *, hours: int, limit: int) -> list[dict[str, Any]]:
         since = datetime.now(timezone.utc) - timedelta(hours=hours)
+        return self.get_samples_range(since=since, until=datetime.now(timezone.utc), limit=limit)
+
+    def get_samples_range(
+        self,
+        *,
+        since: datetime,
+        until: datetime,
+        limit: int,
+    ) -> list[dict[str, Any]]:
         with self._connect() as connection:
             rows = connection.execute(
                 """
                 SELECT source, observed_at, grid_usage_watts, solar_generation_watts, raw_payload
                 FROM samples
                 WHERE observed_at >= ?
+                  AND observed_at <= ?
                 ORDER BY observed_at ASC
                 LIMIT ?
                 """,
-                (since.isoformat(), limit),
+                (
+                    since.astimezone(timezone.utc).isoformat(),
+                    until.astimezone(timezone.utc).isoformat(),
+                    limit,
+                ),
             ).fetchall()
 
         items: list[dict[str, Any]] = []

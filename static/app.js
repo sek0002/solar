@@ -1,4 +1,7 @@
-const hoursSelect = document.querySelector("#hours");
+const hoursInput = document.querySelector("#hours");
+const windowSlider = document.querySelector("#window-slider");
+const startDateInput = document.querySelector("#start-date");
+const startTimeInput = document.querySelector("#start-time");
 const statusCards = document.querySelector("#status-cards");
 const latestValues = document.querySelector("#latest-values");
 const cumulativeStats = document.querySelector("#cumulative-stats");
@@ -159,14 +162,25 @@ function buildNetItems(items) {
 function integrateSeriesKwh(series, valueKey) {
   let cumulative = 0;
   const points = [];
+  let currentDayKey = null;
 
   for (let index = 0; index < series.length; index += 1) {
     const current = series[index];
+    const currentDate = new Date(current.observed_at);
+    const dayKey = `${currentDate.getFullYear()}-${currentDate.getMonth()}-${currentDate.getDate()}`;
+
+    if (dayKey !== currentDayKey) {
+      cumulative = 0;
+      currentDayKey = dayKey;
+    }
+
     if (index > 0) {
       const previous = series[index - 1];
-      const deltaHours = (new Date(current.observed_at) - new Date(previous.observed_at)) / 3600000;
+      const previousDate = new Date(previous.observed_at);
+      const previousDayKey = `${previousDate.getFullYear()}-${previousDate.getMonth()}-${previousDate.getDate()}`;
+      const deltaHours = (currentDate - previousDate) / 3600000;
       const averageWatts = (Number(previous[valueKey]) + Number(current[valueKey])) / 2;
-      if (deltaHours > 0) {
+      if (deltaHours > 0 && previousDayKey === dayKey) {
         cumulative += (averageWatts / 1000) * deltaHours;
       }
     }
@@ -192,7 +206,8 @@ function computeRampSeries(series, valueKey) {
 
     points.push({
       observed_at: current.observed_at,
-      rate_w_per_min: (Number(current[valueKey]) - Number(previous[valueKey])) / deltaMinutes
+      rate_w_per_min: (Number(current[valueKey]) - Number(previous[valueKey])) / deltaMinutes,
+      rate_kw_per_hr: ((Number(current[valueKey]) - Number(previous[valueKey])) / deltaMinutes) * 60 / 1000
     });
   }
   return points;
@@ -223,9 +238,9 @@ function renderCumulativeStats(items) {
   const latestExportKwh = exportKwh.length ? exportKwh[exportKwh.length - 1].cumulative_kwh : 0;
 
   cumulativeStats.innerHTML = [
-    formatStatCard("Solar total", `${latestSolarKwh.toFixed(2)} kWh`, "Integrated local-site generation"),
-    formatStatCard("Grid total", `${latestGridKwh.toFixed(2)} kWh`, "Integrated BLE consumption"),
-    formatStatCard("Net export", `${latestExportKwh.toFixed(2)} kWh`, "Positive solar minus grid only"),
+    formatStatCard("Solar today", `${latestSolarKwh.toFixed(2)} kWh`, "Resets at local midnight"),
+    formatStatCard("Grid today", `${latestGridKwh.toFixed(2)} kWh`, "Resets at local midnight"),
+    formatStatCard("Net export today", `${latestExportKwh.toFixed(2)} kWh`, "Positive solar minus grid since midnight"),
     formatStatCard("Estimated polls", `${imputedCount}`, "Readings imputed from the previous 3 samples")
   ].join("");
 }
@@ -236,6 +251,7 @@ function renderChart(items) {
   const bleGrid = items.filter((item) => item.grid_usage_watts !== null);
   const localSolar = items.filter((item) => item.solar_generation_watts !== null);
   const localGrid = items.filter((item) => item.source === "local_site" && item.grid_usage_watts !== null);
+  const netRamp = computeRampSeries(buildNetItems(items), "net_power_watts");
 
   const traces = [
     {
@@ -264,6 +280,19 @@ function renderChart(items) {
       line: { color: dark ? "#8ee29d" : "#7cc98a", width: 1.45, shape: "linear" },
       fill: "tozeroy",
       fillcolor: dark ? "rgba(142, 226, 157, 0.15)" : "rgba(124, 201, 138, 0.14)"
+    },
+    {
+      x: netRamp.map((item) => item.observed_at),
+      y: netRamp.map((item) => item.rate_kw_per_hr),
+      mode: "lines",
+      name: "Change rate",
+      yaxis: "y2",
+      line: {
+        color: dark ? "#f08de0" : "#da78c6",
+        width: 1.2,
+        dash: "dot",
+        shape: "linear"
+      }
     }
   ];
 
@@ -276,6 +305,15 @@ function renderChart(items) {
     yaxis: {
       ...chartTheme.yaxis,
       title: "Watts"
+    },
+    yaxis2: {
+      title: "kW/hr",
+      overlaying: "y",
+      side: "right",
+      tickfont: { color: dark ? "#97abc5" : "#7a8797", size: 11 },
+      titlefont: { color: dark ? "#97abc5" : "#7a8797" },
+      gridcolor: "rgba(0,0,0,0)",
+      zeroline: false
     }
   }, {
     responsive: true,
@@ -288,6 +326,7 @@ function renderNetChart(items) {
   const chartTheme = buildChartTheme();
   const dark = getTheme() === "dark";
   const netItems = buildNetItems(items);
+  const netRamp = computeRampSeries(netItems, "net_power_watts");
 
   Plotly.react(netChartElement, [
     {
@@ -298,6 +337,32 @@ function renderNetChart(items) {
       line: { color: dark ? "#f08de0" : "#da78c6", width: 1.4, shape: "linear" },
       fill: "tozeroy",
       fillcolor: dark ? "rgba(240, 141, 224, 0.18)" : "rgba(218, 120, 198, 0.16)"
+    },
+    {
+      x: netRamp.map((item) => item.observed_at),
+      y: netRamp.map((item) => item.rate_w_per_min),
+      mode: "lines",
+      name: "Rate (W/min)",
+      yaxis: "y2",
+      line: {
+        color: dark ? "#8ee29d" : "#7cc98a",
+        width: 1.15,
+        dash: "dot",
+        shape: "linear"
+      }
+    },
+    {
+      x: netRamp.map((item) => item.observed_at),
+      y: netRamp.map((item) => item.rate_kw_per_hr),
+      mode: "lines",
+      name: "Rate (kW/hr)",
+      yaxis: "y3",
+      line: {
+        color: dark ? "#7fb0ff" : "#6f96d8",
+        width: 1.1,
+        dash: "dash",
+        shape: "linear"
+      }
     }
   ], {
     ...chartTheme,
@@ -310,6 +375,26 @@ function renderNetChart(items) {
       title: "Solar - grid (W)",
       zeroline: true,
       zerolinecolor: dark ? "rgba(124, 147, 180, 0.42)" : "rgba(164, 179, 201, 0.42)"
+    },
+    yaxis2: {
+      title: "W/min",
+      overlaying: "y",
+      side: "right",
+      tickfont: { color: dark ? "#97abc5" : "#7a8797", size: 11 },
+      titlefont: { color: dark ? "#97abc5" : "#7a8797" },
+      gridcolor: "rgba(0,0,0,0)",
+      zeroline: false
+    },
+    yaxis3: {
+      title: "kW/hr",
+      overlaying: "y",
+      side: "right",
+      anchor: "free",
+      position: 0.94,
+      tickfont: { color: dark ? "#97abc5" : "#7a8797", size: 11 },
+      titlefont: { color: dark ? "#97abc5" : "#7a8797" },
+      gridcolor: "rgba(0,0,0,0)",
+      zeroline: false
     }
   }, {
     responsive: true,
@@ -331,23 +416,20 @@ function renderCumulativeChart(items) {
 
   const solarKwh = integrateSeriesKwh(solarItems, "solar_generation_watts");
   const gridKwh = integrateSeriesKwh(bleGridItems, "grid_usage_watts");
-  const netRamp = computeRampSeries(netItems, "net_power_watts");
+  const exportKwh = integrateSeriesKwh(
+    netItems.map((item) => ({
+      observed_at: item.observed_at,
+      net_power_positive: Math.max(item.net_power_watts, 0)
+    })),
+    "net_power_positive"
+  );
 
   Plotly.react(cumulativeChartElement, [
-    {
-      x: netRamp.map((item) => item.observed_at),
-      y: netRamp.map((item) => item.rate_w_per_min),
-      mode: "lines",
-      name: "Net change",
-      yaxis: "y",
-      line: { color: dark ? "#f08de0" : "#da78c6", width: 1.3 }
-    },
     {
       x: solarKwh.map((item) => item.observed_at),
       y: solarKwh.map((item) => item.cumulative_kwh),
       mode: "lines",
       name: "Solar cumulative",
-      yaxis: "y2",
       line: { color: dark ? "#8ee29d" : "#7cc98a", width: 1.6 },
       fill: "tozeroy",
       fillcolor: dark ? "rgba(142, 226, 157, 0.15)" : "rgba(124, 201, 138, 0.12)"
@@ -357,28 +439,28 @@ function renderCumulativeChart(items) {
       y: gridKwh.map((item) => item.cumulative_kwh),
       mode: "lines",
       name: "Grid cumulative",
-      yaxis: "y2",
       line: { color: dark ? "#7fb0ff" : "#6f96d8", width: 1.5 },
       fill: "tozeroy",
       fillcolor: dark ? "rgba(127, 176, 255, 0.12)" : "rgba(111, 150, 216, 0.08)"
+    },
+    {
+      x: exportKwh.map((item) => item.observed_at),
+      y: exportKwh.map((item) => item.cumulative_kwh),
+      mode: "lines",
+      name: "Export cumulative",
+      line: { color: dark ? "#f08de0" : "#da78c6", width: 1.4 },
+      fill: "tozeroy",
+      fillcolor: dark ? "rgba(240, 141, 224, 0.12)" : "rgba(218, 120, 198, 0.1)"
     }
   ], {
     ...chartTheme,
     title: {
-      text: "Cumulative energy / change rate",
+      text: "Cumulative energy",
       font: { color: dark ? "#edf4ff" : "#263445", size: 16 }
     },
     yaxis: {
       ...chartTheme.yaxis,
-      title: "W/min"
-    },
-    yaxis2: {
       title: "kWh",
-      overlaying: "y",
-      side: "right",
-      tickfont: { color: dark ? "#97abc5" : "#7a8797", size: 11 },
-      titlefont: { color: dark ? "#97abc5" : "#7a8797" },
-      gridcolor: "rgba(0,0,0,0)",
       rangemode: "tozero"
     }
   }, {
@@ -389,10 +471,14 @@ function renderCumulativeChart(items) {
 }
 
 async function refresh() {
-  const hours = Number(hoursSelect.value || window.SOLAR_MONITOR_CONFIG.defaultHours || 24);
+  const hours = Number(hoursInput.value || window.SOLAR_MONITOR_CONFIG.defaultHours || 24);
+  const startDate = startDateInput.value;
+  const startTime = startTimeInput.value || "00:00";
+  const end = new Date();
+  const start = startDate ? new Date(`${startDate}T${startTime}`) : new Date(end.getTime() - hours * 3600000);
   const [statusResponse, samplesResponse] = await Promise.all([
     fetch("/api/status"),
-    fetch(`/api/samples?hours=${hours}`)
+    fetch(`/api/samples?hours=${hours}&start=${encodeURIComponent(start.toISOString())}&end=${encodeURIComponent(end.toISOString())}`)
   ]);
 
   if (!statusResponse.ok || !samplesResponse.ok) {
@@ -418,6 +504,15 @@ themeToggle.addEventListener("click", () => {
   setTheme(getTheme() === "dark" ? "light" : "dark");
   refresh();
 });
-hoursSelect.addEventListener("change", refresh);
+windowSlider.addEventListener("input", () => {
+  hoursInput.value = windowSlider.value;
+});
+windowSlider.addEventListener("change", refresh);
+hoursInput.addEventListener("input", () => {
+  windowSlider.value = hoursInput.value;
+});
+hoursInput.addEventListener("change", refresh);
+startDateInput.addEventListener("change", refresh);
+startTimeInput.addEventListener("change", refresh);
 refresh();
 setInterval(refresh, 10000);
