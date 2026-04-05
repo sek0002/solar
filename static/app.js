@@ -1,5 +1,5 @@
 const hoursInput = document.querySelector("#hours");
-const windowSlider = document.querySelector("#window-slider");
+const windowPreset = document.querySelector("#window-preset");
 const startDateInput = document.querySelector("#start-date");
 const startTimeInput = document.querySelector("#start-time");
 const statusCards = document.querySelector("#status-cards");
@@ -90,7 +90,10 @@ function clampHours(value) {
 function syncWindowControls(hours) {
   const clampedHours = clampHours(hours);
   hoursInput.value = clampedHours;
-  windowSlider.value = clampedHours;
+  if (windowPreset) {
+    const presetValues = Array.from(windowPreset.options).map((option) => option.value);
+    windowPreset.value = presetValues.includes(String(clampedHours)) ? String(clampedHours) : "custom";
+  }
   updateUiState((state) => {
     state.controls = state.controls || {};
     state.controls.hours = clampedHours;
@@ -914,9 +917,11 @@ themeToggle.addEventListener("click", () => {
   setTheme(getTheme() === "dark" ? "light" : "dark");
   refresh();
 });
-windowSlider.addEventListener("input", () => {
-  syncWindowControls(windowSlider.value);
-  scheduleRefresh(0);
+windowPreset.addEventListener("change", () => {
+  if (windowPreset.value !== "custom") {
+    syncWindowControls(windowPreset.value);
+    scheduleRefresh(0);
+  }
 });
 hoursInput.addEventListener("input", () => {
   syncWindowControls(hoursInput.value);
