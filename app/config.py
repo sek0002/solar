@@ -42,6 +42,8 @@ class Settings:
     ble_enabled: bool = _env_bool("BLE_ENABLED", True)
     ble_mac: str = os.getenv("BLE_MAC", "C9:91:09:7A:2C:B9")
     ble_pairing_code: str = os.getenv("BLE_PAIRING_CODE", "774034")
+    ble_reading_batch_size_minutes: int = _env_int("BLE_READING_BATCH_SIZE_MINUTES", 1)
+    ble_pulses_per_kwh: float = _env_float("BLE_PULSES_PER_KWH", 1000.0)
     ble_retry_delay_seconds: float = _env_float("BLE_RETRY_DELAY_SECONDS", 5.0)
     ble_connection_timeout_seconds: float = _env_float("BLE_CONNECTION_TIMEOUT_SECONDS", 30.0)
 

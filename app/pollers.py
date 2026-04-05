@@ -5,14 +5,13 @@ import json
 import logging
 import re
 import struct
-import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Optional
 
 import httpx
 import pytz
-from bluepy.btle import ADDR_TYPE_RANDOM, BTLEDisconnectError, BTLEException, DefaultDelegate, Peripheral, UUID
+from bleak import BleakClient, BleakError
 
 from app.config import Settings
 from app.database import Database
@@ -78,24 +77,13 @@ class StatusRegistry:
             ]
 
 
-class _PowerpalNotificationDelegate(DefaultDelegate):
-    def __init__(self, poller: "PowerpalBlePoller") -> None:
-        super().__init__()
-        self._poller = poller
-
-    def handleNotification(self, _: int, data: bytes) -> None:
-        self._poller.handle_notification_bytes(data)
-
-
 class PowerpalBlePoller:
     def __init__(self, settings: Settings, database: Database, statuses: StatusRegistry) -> None:
         self.settings = settings
         self.database = database
         self.statuses = statuses
         self._stopped = asyncio.Event()
-        self._stop_requested = threading.Event()
         self._melbourne_tz = pytz.timezone(settings.timezone_name)
-        self._loop: Optional[asyncio.AbstractEventLoop] = None
 
     @staticmethod
     def convert_pairing_code(original_pairing_code: str) -> bytes:
@@ -104,26 +92,29 @@ class PowerpalBlePoller:
     def _parse_notification(self, data: bytearray) -> dict[str, Any]:
         if len(data) < 6:
             raise ValueError(f"Expected at least 6 BLE bytes, received {len(data)}")
-        int_array = list(data)
         timestamp = struct.unpack_from("<I", data, 0)[0]
-        pulse_sum = int_array[4] + int_array[5]
-        usage_watts = pulse_sum / 0.8
+        total_pulses = struct.unpack_from("<H", data, 4)[0]
+        batch_minutes = max(1, self.settings.ble_reading_batch_size_minutes)
+        pulses_per_kwh = max(self.settings.ble_pulses_per_kwh, 1.0)
+        usage_watts = total_pulses * (1000.0 / pulses_per_kwh) / batch_minutes
+        calculated_kw = total_pulses * ((60.0 / batch_minutes) / pulses_per_kwh)
         utc_time = datetime.fromtimestamp(timestamp, tz=timezone.utc)
         return {
             "observed_at": utc_time.astimezone(self._melbourne_tz),
             "grid_usage_watts": usage_watts,
             "raw_bytes_hex": data.hex(),
-            "pulse_sum": pulse_sum,
+            "total_pulses": total_pulses,
+            "reading_batch_size_minutes": batch_minutes,
+            "pulses_per_kwh": pulses_per_kwh,
+            "calculated_kw": calculated_kw,
         }
 
     async def run(self) -> None:
         await self.statuses.update("ble", state="starting", details={"mac": self.settings.ble_mac})
-        self._loop = asyncio.get_running_loop()
         while not self._stopped.is_set():
             try:
-                self._stop_requested.clear()
                 await self.statuses.update("ble", state="connecting", details={"mac": self.settings.ble_mac})
-                await asyncio.to_thread(self._run_session_blocking)
+                await self._run_session()
                 if not self._stopped.is_set():
                     await self.statuses.update(
                         "ble",
@@ -132,7 +123,7 @@ class PowerpalBlePoller:
                         details={"mac": self.settings.ble_mac},
                     )
                     await asyncio.sleep(self.settings.ble_retry_delay_seconds)
-            except (BTLEException, BTLEDisconnectError) as exc:
+            except BleakError as exc:
                 LOGGER.warning("BLE error: %s", exc)
                 await self._record_error_fallback(str(exc))
                 await self.statuses.update(
@@ -155,30 +146,34 @@ class PowerpalBlePoller:
 
     async def stop(self) -> None:
         self._stopped.set()
-        self._stop_requested.set()
 
-    def _run_session_blocking(self) -> None:
-        peripheral: Optional[Peripheral] = None
-        try:
-            peripheral = Peripheral(self.settings.ble_mac, addrType=ADDR_TYPE_RANDOM)
-            peripheral.withDelegate(_PowerpalNotificationDelegate(self))
+    async def _run_session(self) -> None:
+        batch_size_bytes = int(self.settings.ble_reading_batch_size_minutes).to_bytes(4, byteorder="little")
 
-            pairing_characteristic = peripheral.getCharacteristics(uuid=UUID(PAIRING_CODE_CHAR))[0]
-            frequency_characteristic = peripheral.getCharacteristics(uuid=UUID(POWERPAL_FREQ_CHAR))[0]
-            notify_characteristic = peripheral.getCharacteristics(uuid=UUID(NOTIFY_CHAR))[0]
+        def notification_handler(_: Any, data: bytearray) -> None:
+            asyncio.create_task(self._on_notification(bytearray(data)))
 
-            pairing_characteristic.write(self.convert_pairing_code(self.settings.ble_pairing_code), withResponse=True)
-            frequency_characteristic.write(b"\x01\x00\x00\x00", withResponse=True)
-            peripheral.writeCharacteristic(notify_characteristic.getHandle() + 1, b"\x01\x00", withResponse=True)
+        async with BleakClient(self.settings.ble_mac, timeout=self.settings.ble_connection_timeout_seconds) as client:
+            await client.write_gatt_char(
+                PAIRING_CODE_CHAR,
+                self.convert_pairing_code(self.settings.ble_pairing_code),
+                response=False,
+            )
+            await client.write_gatt_char(
+                POWERPAL_FREQ_CHAR,
+                batch_size_bytes,
+                response=False,
+            )
+            await client.start_notify(NOTIFY_CHAR, notification_handler)
 
-            while not self._stop_requested.is_set():
-                peripheral.waitForNotifications(1.0)
-        finally:
-            if peripheral is not None:
+            try:
+                while not self._stopped.is_set():
+                    await asyncio.sleep(1.0)
+            finally:
                 try:
-                    peripheral.disconnect()
+                    await client.stop_notify(NOTIFY_CHAR)
                 except Exception:
-                    LOGGER.debug("Unable to disconnect bluepy peripheral cleanly", exc_info=True)
+                    LOGGER.debug("Unable to stop bleak notifications cleanly", exc_info=True)
 
     async def _record_error_fallback(self, error_message: str) -> None:
         average_grid = self.database.get_recent_average(
@@ -200,11 +195,6 @@ class PowerpalBlePoller:
                 "average_window": self.settings.failure_average_window,
             },
         )
-
-    def handle_notification_bytes(self, data: bytes) -> None:
-        if self._loop is None:
-            return
-        asyncio.run_coroutine_threadsafe(self._on_notification(bytearray(data)), self._loop)
 
     async def _on_notification(self, data: bytearray) -> None:
         sample = self._parse_notification(data)
