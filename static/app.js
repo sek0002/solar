@@ -10,6 +10,23 @@ const themeToggle = document.querySelector("#theme-toggle");
 const chartElement = document.querySelector("#chart");
 const netChartElement = document.querySelector("#net-chart");
 const cumulativeChartElement = document.querySelector("#cumulative-chart");
+const appTimezone = window.SOLAR_MONITOR_CONFIG.timezoneName || "Australia/Melbourne";
+
+function getZonedParts(dateLike) {
+  const formatter = new Intl.DateTimeFormat("en-AU", {
+    timeZone: appTimezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false
+  });
+  return Object.fromEntries(
+    formatter.formatToParts(new Date(dateLike)).map((part) => [part.type, part.value])
+  );
+}
 
 function getTheme() {
   return document.documentElement.dataset.theme || "light";
@@ -32,16 +49,13 @@ function buildLocalDateTime(dateValue, timeValue) {
 }
 
 function formatLocalDate(date) {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
+  const parts = getZonedParts(date);
+  return `${parts.year}-${parts.month}-${parts.day}`;
 }
 
 function formatLocalTime(date) {
-  const hours = String(date.getHours()).padStart(2, "0");
-  const minutes = String(date.getMinutes()).padStart(2, "0");
-  return `${hours}:${minutes}`;
+  const parts = getZonedParts(date);
+  return `${parts.hour}:${parts.minute}`;
 }
 
 function clampHours(value) {
@@ -113,12 +127,35 @@ function formatNumber(value) {
   if (value === null || value === undefined || Number.isNaN(value)) {
     return "n/a";
   }
-  return `${Number(value).toFixed(1)} W`;
+  return `${Number(value).toFixed(1)} W/min`;
+}
+
+function ratePerMinuteToKwh(ratePerMinute, deltaMinutes) {
+  return (Number(ratePerMinute) * deltaMinutes) / 60000;
+}
+
+function ratePerMinuteToKwPerHour(value) {
+  return (Number(value) * 60) / 1000;
+}
+
+function getDayKey(dateLike) {
+  const parts = getZonedParts(dateLike);
+  return `${parts.year}-${parts.month}-${parts.day}`;
+}
+
+function formatDateTime(dateLike) {
+  if (!dateLike) {
+    return "never";
+  }
+  return new Date(dateLike).toLocaleString("en-AU", { timeZone: appTimezone });
 }
 
 function formatStatusCard(item) {
   const details = Object.entries(item.details || {})
-    .map(([key, value]) => `<small><strong>${key}</strong>: ${value ?? "n/a"}</small>`)
+    .map(([key, value]) => {
+      const displayValue = key.endsWith("_at") && value ? formatDateTime(value) : (value ?? "n/a");
+      return `<small><strong>${key}</strong>: ${displayValue}</small>`;
+    })
     .join("");
 
   const errorBlock = item.last_error
@@ -132,11 +169,11 @@ function formatStatusCard(item) {
         <span class="status-pill status-${item.state}">${item.state}</span>
       </summary>
       <div class="status-minimal">
-        <small>${item.last_success_at ?? "never"}</small>
+        <small>${formatDateTime(item.last_success_at)}</small>
         <small>${item.last_error ? "Issue recorded" : "Healthy"}</small>
       </div>
       <div class="status-card-body">
-        <small><strong>last success</strong>: ${item.last_success_at ?? "never"}</small>
+        <small><strong>last success</strong>: ${formatDateTime(item.last_success_at)}</small>
         ${errorBlock}
         ${details}
       </div>
@@ -152,7 +189,7 @@ function formatMetricCard(item) {
       <strong>Grid: ${formatNumber(item.grid_usage_watts)}</strong>
       <strong>Solar: ${formatNumber(item.solar_generation_watts)}</strong>
       <small>${isImputed ? "Estimated from previous readings" : "Live reading"}</small>
-      <small>${item.observed_at}</small>
+      <small>${formatDateTime(item.observed_at)}</small>
     </article>
   `;
 }
@@ -219,7 +256,7 @@ function integrateSeriesKwh(series, valueKey) {
   for (let index = 0; index < series.length; index += 1) {
     const current = series[index];
     const currentDate = new Date(current.observed_at);
-    const dayKey = `${currentDate.getFullYear()}-${currentDate.getMonth()}-${currentDate.getDate()}`;
+    const dayKey = getDayKey(currentDate);
 
     if (dayKey !== currentDayKey) {
       cumulative = 0;
@@ -229,11 +266,11 @@ function integrateSeriesKwh(series, valueKey) {
     if (index > 0) {
       const previous = series[index - 1];
       const previousDate = new Date(previous.observed_at);
-      const previousDayKey = `${previousDate.getFullYear()}-${previousDate.getMonth()}-${previousDate.getDate()}`;
-      const deltaHours = (currentDate - previousDate) / 3600000;
-      const averageWatts = (Number(previous[valueKey]) + Number(current[valueKey])) / 2;
-      if (deltaHours > 0 && previousDayKey === dayKey) {
-        cumulative += (averageWatts / 1000) * deltaHours;
+      const previousDayKey = getDayKey(previousDate);
+      const deltaMinutes = (currentDate - previousDate) / 60000;
+      const averageRate = (Number(previous[valueKey]) + Number(current[valueKey])) / 2;
+      if (deltaMinutes > 0 && previousDayKey === dayKey) {
+        cumulative += ratePerMinuteToKwh(averageRate, deltaMinutes);
       }
     }
 
@@ -247,22 +284,11 @@ function integrateSeriesKwh(series, valueKey) {
 }
 
 function computeRampSeries(series, valueKey) {
-  const points = [];
-  for (let index = 1; index < series.length; index += 1) {
-    const previous = series[index - 1];
-    const current = series[index];
-    const deltaMinutes = (new Date(current.observed_at) - new Date(previous.observed_at)) / 60000;
-    if (deltaMinutes <= 0) {
-      continue;
-    }
-
-    points.push({
-      observed_at: current.observed_at,
-      rate_w_per_min: (Number(current[valueKey]) - Number(previous[valueKey])) / deltaMinutes,
-      rate_kw_per_hr: ((Number(current[valueKey]) - Number(previous[valueKey])) / deltaMinutes) * 60 / 1000
-    });
-  }
-  return points;
+  return series.map((item) => ({
+    observed_at: item.observed_at,
+    rate_w_per_min: Number(item[valueKey]),
+    rate_kw_per_hr: ratePerMinuteToKwPerHour(item[valueKey])
+  }));
 }
 
 function renderCumulativeStats(items) {
@@ -290,9 +316,9 @@ function renderCumulativeStats(items) {
   const latestExportKwh = exportKwh.length ? exportKwh[exportKwh.length - 1].cumulative_kwh : 0;
 
   cumulativeStats.innerHTML = [
-    formatStatCard("Solar today", `${latestSolarKwh.toFixed(2)} kWh`, "Resets at local midnight"),
-    formatStatCard("Grid today", `${latestGridKwh.toFixed(2)} kWh`, "Resets at local midnight"),
-    formatStatCard("Net export today", `${latestExportKwh.toFixed(2)} kWh`, "Positive solar minus grid since midnight"),
+    formatStatCard("Solar today", `${latestSolarKwh.toFixed(2)} kWh`, "Resets at Melbourne midnight"),
+    formatStatCard("Grid today", `${latestGridKwh.toFixed(2)} kWh`, "Resets at Melbourne midnight"),
+    formatStatCard("Net export today", `${latestExportKwh.toFixed(2)} kWh`, "Positive solar minus grid since Melbourne midnight"),
     formatStatCard("Estimated polls", `${imputedCount}`, "Readings imputed from the previous 3 samples")
   ].join("");
 }
@@ -303,7 +329,9 @@ function renderChart(items) {
   const bleGrid = items.filter((item) => item.grid_usage_watts !== null);
   const localSolar = items.filter((item) => item.solar_generation_watts !== null);
   const localGrid = items.filter((item) => item.source === "local_site" && item.grid_usage_watts !== null);
-  const netRamp = computeRampSeries(buildNetItems(items), "net_power_watts");
+  const bleGridRate = computeRampSeries(bleGrid, "grid_usage_watts");
+  const localGridRate = computeRampSeries(localGrid, "grid_usage_watts");
+  const localSolarRate = computeRampSeries(localSolar, "solar_generation_watts");
 
   const traces = [
     {
@@ -316,6 +344,15 @@ function renderChart(items) {
       fillcolor: dark ? "rgba(127, 176, 255, 0.16)" : "rgba(111, 150, 216, 0.17)"
     },
     {
+      x: bleGridRate.map((item) => item.observed_at),
+      y: bleGridRate.map((item) => item.rate_kw_per_hr),
+      yaxis: "y2",
+      mode: "lines",
+      showlegend: false,
+      hoverinfo: "skip",
+      line: { color: "rgba(0,0,0,0)", width: 0 }
+    },
+    {
       x: localGrid.map((item) => item.observed_at),
       y: localGrid.map((item) => item.grid_usage_watts),
       mode: "lines",
@@ -323,6 +360,15 @@ function renderChart(items) {
       line: { color: dark ? "#d98eff" : "#b57adf", width: 1.15, shape: "linear" },
       fill: "tozeroy",
       fillcolor: dark ? "rgba(217, 142, 255, 0.08)" : "rgba(181, 122, 223, 0.08)"
+    },
+    {
+      x: localGridRate.map((item) => item.observed_at),
+      y: localGridRate.map((item) => item.rate_kw_per_hr),
+      yaxis: "y2",
+      mode: "lines",
+      showlegend: false,
+      hoverinfo: "skip",
+      line: { color: "rgba(0,0,0,0)", width: 0 }
     },
     {
       x: localSolar.map((item) => item.observed_at),
@@ -334,17 +380,13 @@ function renderChart(items) {
       fillcolor: dark ? "rgba(142, 226, 157, 0.15)" : "rgba(124, 201, 138, 0.14)"
     },
     {
-      x: netRamp.map((item) => item.observed_at),
-      y: netRamp.map((item) => item.rate_kw_per_hr),
-      mode: "lines",
-      name: "Change rate",
+      x: localSolarRate.map((item) => item.observed_at),
+      y: localSolarRate.map((item) => item.rate_kw_per_hr),
       yaxis: "y2",
-      line: {
-        color: dark ? "#f08de0" : "#da78c6",
-        width: 1.2,
-        dash: "dot",
-        shape: "linear"
-      }
+      mode: "lines",
+      showlegend: false,
+      hoverinfo: "skip",
+      line: { color: "rgba(0,0,0,0)", width: 0 }
     }
   ];
 
@@ -356,7 +398,7 @@ function renderChart(items) {
     },
     yaxis: {
       ...chartTheme.yaxis,
-      title: "Watts"
+      title: "W/min"
     },
     yaxis2: {
       title: "kW/hr",
@@ -392,29 +434,17 @@ function renderNetChart(items) {
     },
     {
       x: netRamp.map((item) => item.observed_at),
-      y: netRamp.map((item) => item.rate_w_per_min),
-      mode: "lines",
-      name: "Rate (W/min)",
-      yaxis: "y2",
-      line: {
-        color: dark ? "#8ee29d" : "#7cc98a",
-        width: 1.15,
-        dash: "dot",
-        shape: "linear"
-      }
-    },
-    {
-      x: netRamp.map((item) => item.observed_at),
       y: netRamp.map((item) => item.rate_kw_per_hr),
       mode: "lines",
       name: "Rate (kW/hr)",
-      yaxis: "y3",
+      yaxis: "y2",
       line: {
         color: dark ? "#7fb0ff" : "#6f96d8",
-        width: 1.1,
-        dash: "dash",
+        width: 0,
         shape: "linear"
-      }
+      },
+      hoverinfo: "skip",
+      showlegend: false
     }
   ], {
     ...chartTheme,
@@ -424,25 +454,14 @@ function renderNetChart(items) {
     },
     yaxis: {
       ...chartTheme.yaxis,
-      title: "Solar - grid (W)",
+      title: "Solar - grid (W/min)",
       zeroline: true,
       zerolinecolor: dark ? "rgba(124, 147, 180, 0.42)" : "rgba(164, 179, 201, 0.42)"
     },
     yaxis2: {
-      title: "W/min",
-      overlaying: "y",
-      side: "right",
-      tickfont: { color: dark ? "#97abc5" : "#7a8797", size: 11 },
-      titlefont: { color: dark ? "#97abc5" : "#7a8797" },
-      gridcolor: "rgba(0,0,0,0)",
-      zeroline: false
-    },
-    yaxis3: {
       title: "kW/hr",
       overlaying: "y",
       side: "right",
-      anchor: "free",
-      position: 0.94,
       tickfont: { color: dark ? "#97abc5" : "#7a8797", size: 11 },
       titlefont: { color: dark ? "#97abc5" : "#7a8797" },
       gridcolor: "rgba(0,0,0,0)",
@@ -538,7 +557,7 @@ function renderEmptyCharts() {
   Plotly.react(chartElement, [], {
     ...chartTheme,
     annotations: [emptyAnnotation],
-    yaxis: { ...chartTheme.yaxis, title: "Watts" },
+    yaxis: { ...chartTheme.yaxis, title: "W/min" },
     yaxis2: {
       title: "kW/hr",
       overlaying: "y",
@@ -553,7 +572,16 @@ function renderEmptyCharts() {
   Plotly.react(netChartElement, [], {
     ...chartTheme,
     annotations: [emptyAnnotation],
-    yaxis: { ...chartTheme.yaxis, title: "Solar - grid (W)" }
+    yaxis: { ...chartTheme.yaxis, title: "Solar - grid (W/min)" },
+    yaxis2: {
+      title: "kW/hr",
+      overlaying: "y",
+      side: "right",
+      tickfont: { color: dark ? "#97abc5" : "#7a8797", size: 11 },
+      titlefont: { color: dark ? "#97abc5" : "#7a8797" },
+      gridcolor: "rgba(0,0,0,0)",
+      zeroline: false
+    }
   }, { responsive: true, displaylogo: false, modeBarButtonsToRemove: ["lasso2d", "select2d"] });
 
   Plotly.react(cumulativeChartElement, [], {
@@ -604,7 +632,7 @@ async function refresh() {
     renderChart(items);
     renderNetChart(items);
     renderCumulativeChart(items);
-    refreshText.textContent = `Updated ${new Date().toLocaleTimeString()}`;
+    refreshText.textContent = `Updated ${new Date().toLocaleTimeString("en-AU", { timeZone: appTimezone })}`;
   } catch (error) {
     console.error("Refresh failed", error);
     renderEmptyCharts();

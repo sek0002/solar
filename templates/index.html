@@ -39,7 +39,7 @@
     <section class="panel chart-panel">
       <div class="panel-header">
         <h2>Power vs time</h2>
-        <span>Power traces with change rate overlay on the right axis.</span>
+        <span>Rate traces in W/min with matching kW/hr scale on the right axis.</span>
       </div>
       <div id="chart"></div>
     </section>
@@ -47,7 +47,7 @@
     <section class="panel chart-panel">
       <div class="panel-header">
         <h2>Net solar minus grid</h2>
-        <span>Net watts with change rate overlays in W/min and kW/hr.</span>
+        <span>Net rate in W/min with matching kW/hr scale on the right axis.</span>
       </div>
       <div id="net-chart"></div>
     </section>
@@ -55,7 +55,7 @@
     <section class="panel chart-panel">
       <div class="panel-header">
         <h2>Cumulative energy</h2>
-        <span>Daily cumulative kWh that resets at local midnight.</span>
+        <span>Daily cumulative kWh reset at Melbourne midnight.</span>
       </div>
       <div id="cumulative-chart"></div>
     </section>
@@ -95,7 +95,7 @@
     <section class="panel">
       <div class="panel-header">
         <h2>Cumulative stats</h2>
-        <span>Day totals that reset at local midnight.</span>
+        <span>Day totals that reset at Melbourne midnight.</span>
       </div>
       <div id="cumulative-stats" class="stats-grid"></div>
     </section>
@@ -103,7 +103,8 @@
 
   <script>
     window.SOLAR_MONITOR_CONFIG = {
-      defaultHours: {{ default_hours }}
+      defaultHours: {{ default_hours }},
+      timezoneName: {{ timezone_name|tojson }}
     };
   </script>
   <script src="/static/app.js"></script>

@@ -60,6 +60,7 @@ async def index(request: Request) -> HTMLResponse:
             "app_title": settings.app_title,
             "request": request,
             "default_hours": settings.api_default_hours,
+            "timezone_name": settings.timezone_name,
             "latest_samples": latest_samples,
             "statuses": statuses,
         },
