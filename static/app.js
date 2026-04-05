@@ -7,25 +7,25 @@ const netChartElement = document.querySelector("#net-chart");
 
 const chartTheme = {
   paper_bgcolor: "rgba(0,0,0,0)",
-  plot_bgcolor: "#0e1a2b",
+  plot_bgcolor: "#ffffff",
   margin: { t: 18, r: 18, b: 44, l: 52 },
   hovermode: "x unified",
   hoverlabel: {
-    bgcolor: "rgba(9, 17, 28, 0.96)",
-    bordercolor: "rgba(135, 156, 186, 0.22)",
-    font: { color: "#edf4ff", size: 12 }
+    bgcolor: "rgba(255,255,255,0.95)",
+    bordercolor: "rgba(120, 132, 155, 0.22)",
+    font: { color: "#314055", size: 12 }
   },
   xaxis: {
     title: "",
-    gridcolor: "rgba(124, 147, 180, 0.12)",
-    tickfont: { color: "#97abc5", size: 11 },
+    gridcolor: "rgba(164, 179, 201, 0.14)",
+    tickfont: { color: "#7a8797", size: 11 },
     zeroline: false,
-    linecolor: "rgba(124, 147, 180, 0.18)"
+    linecolor: "rgba(164, 179, 201, 0.18)"
   },
   yaxis: {
     title: "",
-    gridcolor: "rgba(124, 147, 180, 0.14)",
-    tickfont: { color: "#97abc5", size: 11 },
+    gridcolor: "rgba(164, 179, 201, 0.16)",
+    tickfont: { color: "#7a8797", size: 11 },
     zeroline: false,
     rangemode: "tozero"
   },
@@ -33,7 +33,7 @@ const chartTheme = {
     orientation: "h",
     y: -0.14,
     x: 0,
-    font: { color: "#c0d0e5", size: 12 },
+    font: { color: "#5e6b7d", size: 12 },
     bgcolor: "rgba(0,0,0,0)"
   }
 };
@@ -87,27 +87,27 @@ function renderChart(items) {
       y: bleGrid.map((item) => item.grid_usage_watts),
       mode: "lines",
       name: "Consumption",
-      line: { color: "#7fb0ff", width: 1.5, shape: "linear" },
+      line: { color: "#6f96d8", width: 1.5, shape: "linear" },
       fill: "tozeroy",
-      fillcolor: "rgba(127, 176, 255, 0.16)"
+      fillcolor: "rgba(111, 150, 216, 0.17)"
     },
     {
       x: localGrid.map((item) => item.observed_at),
       y: localGrid.map((item) => item.grid_usage_watts),
       mode: "lines",
       name: "Site grid",
-      line: { color: "#d98eff", width: 1.15, shape: "linear" },
+      line: { color: "#b57adf", width: 1.15, shape: "linear" },
       fill: "tozeroy",
-      fillcolor: "rgba(217, 142, 255, 0.08)"
+      fillcolor: "rgba(181, 122, 223, 0.08)"
     },
     {
       x: localSolar.map((item) => item.observed_at),
       y: localSolar.map((item) => item.solar_generation_watts),
       mode: "lines",
       name: "Generation",
-      line: { color: "#8ee29d", width: 1.45, shape: "linear" },
+      line: { color: "#7cc98a", width: 1.45, shape: "linear" },
       fill: "tozeroy",
-      fillcolor: "rgba(142, 226, 157, 0.15)"
+      fillcolor: "rgba(124, 201, 138, 0.14)"
     }
   ];
 
@@ -115,7 +115,7 @@ function renderChart(items) {
     ...chartTheme,
     title: {
       text: "Generation / Consumption / Site Grid",
-      font: { color: "#edf4ff", size: 16 }
+      font: { color: "#263445", size: 16 }
     },
     yaxis: {
       ...chartTheme.yaxis,
@@ -174,21 +174,21 @@ function renderNetChart(items) {
       y: netItems.map((item) => item.net_power_watts),
       mode: "lines",
       name: "Export balance",
-      line: { color: "#f08de0", width: 1.4, shape: "linear" },
+      line: { color: "#da78c6", width: 1.4, shape: "linear" },
       fill: "tozeroy",
-      fillcolor: "rgba(240, 141, 224, 0.18)"
+      fillcolor: "rgba(218, 120, 198, 0.16)"
     }
   ], {
     ...chartTheme,
     title: {
       text: "Export Balance",
-      font: { color: "#edf4ff", size: 16 }
+      font: { color: "#263445", size: 16 }
     },
     yaxis: {
       ...chartTheme.yaxis,
       title: "Solar - grid (W)",
       zeroline: true,
-      zerolinecolor: "rgba(124, 147, 180, 0.42)"
+      zerolinecolor: "rgba(164, 179, 201, 0.42)"
     }
   }, {
     responsive: true,
