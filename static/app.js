@@ -21,6 +21,16 @@ function setTheme(theme) {
   themeToggle.textContent = theme === "dark" ? "Light mode" : "Dark mode";
 }
 
+function buildLocalDateTime(dateValue, timeValue) {
+  if (!dateValue) {
+    return new Date();
+  }
+
+  const [year, month, day] = dateValue.split("-").map(Number);
+  const [hours, minutes] = (timeValue || "00:00").split(":").map(Number);
+  return new Date(year, (month || 1) - 1, day || 1, hours || 0, minutes || 0, 0, 0);
+}
+
 function buildChartTheme() {
   const dark = getTheme() === "dark";
   return {
@@ -472,10 +482,10 @@ function renderCumulativeChart(items) {
 
 async function refresh() {
   const hours = Number(hoursInput.value || window.SOLAR_MONITOR_CONFIG.defaultHours || 24);
-  const startDate = startDateInput.value;
-  const startTime = startTimeInput.value || "00:00";
-  const end = new Date();
-  const start = startDate ? new Date(`${startDate}T${startTime}`) : new Date(end.getTime() - hours * 3600000);
+  const selectedDate = startDateInput.value;
+  const selectedTime = startTimeInput.value || "00:00";
+  const end = buildLocalDateTime(selectedDate, selectedTime);
+  const start = new Date(end.getTime() - hours * 3600000);
   const [statusResponse, samplesResponse] = await Promise.all([
     fetch("/api/status"),
     fetch(`/api/samples?hours=${hours}&start=${encodeURIComponent(start.toISOString())}&end=${encodeURIComponent(end.toISOString())}`)
@@ -500,19 +510,26 @@ async function refresh() {
 
 const storedTheme = localStorage.getItem("solar-monitor-theme");
 setTheme(storedTheme || "light");
+if (!startDateInput.value) {
+  const now = new Date();
+  startDateInput.value = now.toISOString().slice(0, 10);
+  startTimeInput.value = now.toTimeString().slice(0, 5);
+}
 themeToggle.addEventListener("click", () => {
   setTheme(getTheme() === "dark" ? "light" : "dark");
   refresh();
 });
 windowSlider.addEventListener("input", () => {
   hoursInput.value = windowSlider.value;
+  refresh();
 });
-windowSlider.addEventListener("change", refresh);
 hoursInput.addEventListener("input", () => {
   windowSlider.value = hoursInput.value;
+  refresh();
 });
-hoursInput.addEventListener("change", refresh);
 startDateInput.addEventListener("change", refresh);
 startTimeInput.addEventListener("change", refresh);
+startDateInput.addEventListener("input", refresh);
+startTimeInput.addEventListener("input", refresh);
 refresh();
 setInterval(refresh, 10000);
