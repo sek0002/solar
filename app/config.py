@@ -68,6 +68,12 @@ class Settings:
     local_site_connection_zero_after_minutes: float = _env_float("LOCAL_SITE_CONNECTION_ZERO_AFTER_MINUTES", 10.0)
     failure_average_window: int = _env_int("FAILURE_AVERAGE_WINDOW", 3)
 
+    byd_enabled: bool = _env_bool("BYD_ENABLED", False)
+    byd_python_bin: str = os.getenv("BYD_PYTHON_BIN", "python3")
+    byd_vin: str = os.getenv("BYD_VIN", "")
+    byd_poll_seconds: float = _env_float("BYD_POLL_SECONDS", 60.0)
+    byd_command_timeout_seconds: float = _env_float("BYD_COMMAND_TIMEOUT_SECONDS", 120.0)
+
     tuya_enabled: bool = _env_bool("TUYA_ENABLED", False)
     tuya_base_url: str = os.getenv("TUYA_BASE_URL", "https://openapi.tuyaeu.com")
     tuya_access_id: str = os.getenv("TUYA_ACCESS_ID", "")

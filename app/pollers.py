@@ -5,10 +5,12 @@ import hashlib
 import hmac
 import json
 import logging
+import os
 import re
 import struct
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Optional
 import uuid
 
@@ -756,6 +758,102 @@ class TuyaEvPoller:
         }
 
 
+class BydEvPoller:
+    def __init__(self, settings: Settings, database: Database, statuses: StatusRegistry) -> None:
+        self.settings = settings
+        self.database = database
+        self.statuses = statuses
+        self._stopped = asyncio.Event()
+        self._script_path = Path(__file__).resolve().parents[1] / "scripts" / "byd_poll.py"
+
+    async def run(self) -> None:
+        await self.statuses.update(
+            "byd_ev",
+            state="starting",
+            details={"vin": self.settings.byd_vin or "auto"},
+        )
+        while not self._stopped.is_set():
+            try:
+                sample = await self._fetch_sample()
+                observed_at = datetime.now(timezone.utc)
+                self.database.insert_sample(
+                    source="byd_ev",
+                    observed_at=observed_at,
+                    grid_usage_watts=sample["ev_charging_rate_w_per_min"],
+                    solar_generation_watts=None,
+                    raw_payload=sample,
+                )
+                await self.statuses.update(
+                    "byd_ev",
+                    state="connected",
+                    mark_success=True,
+                    details={
+                        "vin": sample.get("vin") or self.settings.byd_vin or "auto",
+                        "model_name": sample.get("model_name"),
+                        "brand_name": sample.get("brand_name"),
+                        "soc_percent": sample.get("soc_percent"),
+                        "range_km": sample.get("range_km"),
+                        "charging_state": sample.get("charging_state"),
+                        "is_charging": sample.get("is_charging"),
+                        "is_connected": sample.get("is_connected"),
+                        "time_to_full_minutes": sample.get("time_to_full_minutes"),
+                        "power_w": sample.get("power_w"),
+                        "power_source": sample.get("power_source"),
+                        "latest_observed_at": observed_at.isoformat(),
+                    },
+                )
+            except Exception as exc:
+                LOGGER.warning("BYD EV error: %s", exc)
+                await self.statuses.update(
+                    "byd_ev",
+                    state="error",
+                    error=str(exc),
+                    details={"vin": self.settings.byd_vin or "auto"},
+                )
+            await asyncio.sleep(self.settings.byd_poll_seconds)
+
+    async def stop(self) -> None:
+        self._stopped.set()
+
+    async def _fetch_sample(self) -> dict[str, Any]:
+        env = os.environ.copy()
+        process = await asyncio.create_subprocess_exec(
+            self.settings.byd_python_bin,
+            str(self._script_path),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            env=env,
+        )
+        try:
+            stdout, stderr = await asyncio.wait_for(
+                process.communicate(),
+                timeout=self.settings.byd_command_timeout_seconds,
+            )
+        except asyncio.TimeoutError:
+            process.kill()
+            await process.communicate()
+            raise RuntimeError("BYD poll timed out")
+
+        stdout_text = stdout.decode().strip()
+        stderr_text = stderr.decode().strip()
+        if process.returncode != 0:
+            message = stderr_text or stdout_text or f"BYD helper exited with code {process.returncode}"
+            raise RuntimeError(message)
+
+        try:
+            payload = json.loads(stdout_text)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(f"Invalid BYD helper JSON: {exc}") from exc
+
+        if payload.get("error"):
+            raise RuntimeError(str(payload["error"]))
+
+        power_w = payload.get("power_w")
+        charging_rate_w_per_min = float(power_w) / 60.0 if power_w is not None else 0.0
+        payload["ev_charging_rate_w_per_min"] = charging_rate_w_per_min
+        return payload
+
+
 class PollingCoordinator:
     def __init__(self, settings: Settings, database: Database) -> None:
         self.settings = settings
@@ -775,10 +873,10 @@ class PollingCoordinator:
             self.pollers.append(site_poller)
             self.tasks.append(asyncio.create_task(site_poller.run(), name="local-site-poller"))
 
-        if self.settings.tuya_enabled:
-            tuya_poller = TuyaEvPoller(self.settings, self.database, self.statuses)
-            self.pollers.append(tuya_poller)
-            self.tasks.append(asyncio.create_task(tuya_poller.run(), name="tuya-ev-poller"))
+        if self.settings.byd_enabled:
+            byd_poller = BydEvPoller(self.settings, self.database, self.statuses)
+            self.pollers.append(byd_poller)
+            self.tasks.append(asyncio.create_task(byd_poller.run(), name="byd-ev-poller"))
 
     async def stop(self) -> None:
         for poller in self.pollers:

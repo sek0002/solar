@@ -536,15 +536,22 @@ function formatMetricReading(label, value) {
 
 function formatMetricCard(item) {
   const isImputed = item.raw_payload && item.raw_payload.imputed;
-  if (item.source === "tuya_ev") {
+  if (item.source === "byd_ev") {
     const payload = item.raw_payload || {};
+    const etaMinutes = payload.time_to_full_minutes;
+    const etaText = etaMinutes === null || etaMinutes === undefined
+      ? "n/a"
+      : `${Math.floor(Number(etaMinutes) / 60)}h ${Number(etaMinutes) % 60}m`;
     return `
       <article class="metric-card">
-        <span>tuya_ev</span>
-        ${formatMetricReading("EV charger", item.grid_usage_watts)}
-        <small>Voltage: ${payload.voltage_v === null || payload.voltage_v === undefined ? "n/a" : `${Number(payload.voltage_v).toFixed(1)} V`}</small>
-        <small>Current: ${payload.current_a === null || payload.current_a === undefined ? "n/a" : `${Number(payload.current_a).toFixed(1)} A`}</small>
-        <small>Temperature: ${payload.temperature_c === null || payload.temperature_c === undefined ? "n/a" : `${Number(payload.temperature_c).toFixed(1)} C`}</small>
+        <span>byd_ev</span>
+        ${formatMetricReading("BYD EV", item.grid_usage_watts)}
+        <small>SoC: ${payload.soc_percent === null || payload.soc_percent === undefined ? "n/a" : `${Number(payload.soc_percent).toFixed(0)}%`}</small>
+        <small>Range: ${payload.range_km === null || payload.range_km === undefined ? "n/a" : `${Number(payload.range_km).toFixed(0)} km`}</small>
+        <small>Charge state: ${payload.charging_state || "n/a"}</small>
+        <small>Connected: ${payload.is_connected ? "yes" : "no"}</small>
+        <small>ETA: ${etaText}</small>
+        <small>Mileage: ${payload.total_mileage_km === null || payload.total_mileage_km === undefined ? "n/a" : `${Number(payload.total_mileage_km).toFixed(0)} km`}</small>
         <small>${formatDateTime(item.observed_at)}</small>
       </article>
     `;
@@ -726,7 +733,7 @@ function getTodayAndWeekTotals(items) {
   );
   const evSegments = buildEnergySegments(
     items
-      .filter((item) => item.source === "tuya_ev" && item.grid_usage_watts !== null)
+      .filter((item) => item.source === "byd_ev" && item.grid_usage_watts !== null)
       .sort((left, right) => new Date(left.observed_at) - new Date(right.observed_at)),
     "grid_usage_watts"
   );
@@ -905,10 +912,10 @@ function renderBleSolarChart(items, historyItems) {
     .filter((item) => item.source === "local_site" && item.solar_generation_watts !== null)
     .sort((left, right) => new Date(left.observed_at) - new Date(right.observed_at));
   const evItems = items
-    .filter((item) => item.source === "tuya_ev" && item.grid_usage_watts !== null)
+    .filter((item) => item.source === "byd_ev" && item.grid_usage_watts !== null)
     .sort((left, right) => new Date(left.observed_at) - new Date(right.observed_at));
   const evHistoryItems = historyItems
-    .filter((item) => item.source === "tuya_ev" && item.grid_usage_watts !== null)
+    .filter((item) => item.source === "byd_ev" && item.grid_usage_watts !== null)
     .sort((left, right) => new Date(left.observed_at) - new Date(right.observed_at));
 
   const chartTheme = buildChartTheme();
@@ -999,16 +1006,16 @@ function renderBleSolarChart(items, historyItems) {
       y: evItems.map((item) => ratePerMinuteToKwPerHour(item.grid_usage_watts)),
       customdata: evItems.map((item) => Number(item.grid_usage_watts)),
       mode: "lines",
-      name: "EV charger",
+      name: "BYD EV",
       line: { color: dark ? "#ffb45b" : "#d6882e", width: 1.6, shape: "linear" },
-      hovertemplate: buildRateHoverTemplate("EV charger")
+      hovertemplate: buildRateHoverTemplate("BYD EV")
     },
     {
       x: evItems.map((item) => toChartTime(item.observed_at)),
       y: evItems.map((item) => Number(item.grid_usage_watts)),
       yaxis: "y2",
       mode: "lines",
-      name: "EV charger raw",
+      name: "BYD EV raw",
       showlegend: false,
       hoverinfo: "skip",
       line: { color: "rgba(0,0,0,0)", width: 0 }
@@ -1018,19 +1025,19 @@ function renderBleSolarChart(items, historyItems) {
       y: buildProjectionSeries(evItems, "grid_usage_watts").map((item) => ratePerMinuteToKwPerHour(item.value)),
       customdata: buildProjectionSeries(evItems, "grid_usage_watts").map((item) => Number(item.value)),
       mode: "lines",
-      name: "EV charger trend",
+      name: "BYD EV trend",
       line: { color: dark ? "#ffb45b" : "#d6882e", width: 1.5, dash: "dot" },
-      hovertemplate: buildRateHoverTemplate("EV charger trend")
+      hovertemplate: buildRateHoverTemplate("BYD EV trend")
     },
     {
       x: buildWeeklyMeanSeries(evHistoryItems, "grid_usage_watts").filter((item) => item.value !== null).map((item) => toChartTime(item.observed_at)),
       y: buildWeeklyMeanSeries(evHistoryItems, "grid_usage_watts").filter((item) => item.value !== null).map((item) => ratePerMinuteToKwPerHour(item.value)),
       customdata: buildWeeklyMeanSeries(evHistoryItems, "grid_usage_watts").filter((item) => item.value !== null).map((item) => Number(item.value)),
       mode: "lines",
-      name: "EV charger weekly mean",
+      name: "BYD EV weekly mean",
       line: { color: dark ? "#ffb45b" : "#d6882e", width: 1.2, dash: "dash" },
       opacity: 0.35,
-      hovertemplate: buildRateHoverTemplate("EV charger weekly mean")
+      hovertemplate: buildRateHoverTemplate("BYD EV weekly mean")
     }
   ];
 
@@ -1040,7 +1047,7 @@ function renderBleSolarChart(items, historyItems) {
     shapes: nowX ? [buildNowLine(nowX)] : [],
     uirevision: "ble-solar-rate",
     title: {
-      text: "BLE grid, site solar, and EV charger",
+      text: "BLE grid, site solar, and BYD EV",
       font: { color: dark ? "#edf4ff" : "#263445", size: 16 }
     },
     yaxis: {
@@ -1080,7 +1087,7 @@ function renderCumulativeChart(items) {
     .filter((item) => item.source === "ble" && item.grid_usage_watts !== null)
     .sort((left, right) => new Date(left.observed_at) - new Date(right.observed_at));
   const evItems = items
-    .filter((item) => item.source === "tuya_ev" && item.grid_usage_watts !== null)
+    .filter((item) => item.source === "byd_ev" && item.grid_usage_watts !== null)
     .sort((left, right) => new Date(left.observed_at) - new Date(right.observed_at));
 
   const solarKwh = integrateSeriesKwh(solarItems, "solar_generation_watts");
@@ -1115,7 +1122,7 @@ function renderCumulativeChart(items) {
       x: evKwh.map((item) => toChartTime(item.observed_at)),
       y: evKwh.map((item) => item.cumulative_kwh),
       mode: "lines",
-      name: "EV charger cumulative",
+      name: "BYD EV cumulative",
       line: { color: dark ? "#ffb45b" : "#d6882e", width: 1.5 },
       fill: "tozeroy",
       fillcolor: dark ? "rgba(255, 180, 91, 0.12)" : "rgba(214, 136, 46, 0.10)"
@@ -1281,7 +1288,7 @@ function renderEmptyCharts() {
     captureChartState(element, chartKey);
   }
 
-  emptyRateChart(bleChartElement, "ble-solar-rate", "BLE grid, site solar, and EV charger");
+  emptyRateChart(bleChartElement, "ble-solar-rate", "BLE grid, site solar, and BYD EV");
   emptyEnergyChart(cumulativeChartElement, "cumulative", "Cumulative energy");
   emptyEnergyChart(hourlyChartElement, "hourly-bars", "Hourly cumulative split");
   emptyEnergyChart(weeklyChartElement, "weekly-bars", "Weekly cumulative split");
@@ -1314,7 +1321,10 @@ async function refresh() {
     const historyItems = Array.isArray(historyPayload.items) ? historyPayload.items : [];
 
     renderStatusCards(statusPayload.pollers);
-    latestValues.innerHTML = statusPayload.latest_samples.map(formatMetricCard).join("");
+    latestValues.innerHTML = statusPayload.latest_samples
+      .filter((item) => item.source !== "tuya_ev")
+      .map(formatMetricCard)
+      .join("");
     const batteryPercent = getBleBatteryPercent(statusPayload.pollers);
     batteryText.textContent = batteryPercent === null ? "Battery n/a" : `Battery ${batteryPercent}%`;
 
