@@ -196,6 +196,27 @@ input[type="range"] {
   border-radius: 18px;
 }
 
+.metric-reading {
+  display: grid;
+  gap: 4px;
+}
+
+.metric-reading span {
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.metric-reading strong {
+  font-size: 1.2rem;
+  line-height: 1.2;
+}
+
+.metric-reading small {
+  font-size: 0.88rem;
+}
+
 .status-card strong,
 .metric-card strong,
 .stat-card strong {

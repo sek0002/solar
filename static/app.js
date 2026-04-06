@@ -283,8 +283,9 @@ function renderStatusCards(items) {
 
 function buildRateDisplay(label, value) {
   return `
-    <div>
-      <strong>${label}: ${formatKwPerHr(value)}</strong>
+    <div class="metric-reading">
+      <span>${label}</span>
+      <strong>${formatKwPerHr(value)}</strong>
       <small>${formatWMin(value)}</small>
     </div>
   `;
