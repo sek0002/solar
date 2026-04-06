@@ -38,11 +38,17 @@
             <input id="start-time" type="time" step="60">
           </div>
         </div>
+        <button id="reset-range" class="theme-toggle" type="button" aria-label="Reset start time">
+          Reset
+        </button>
         <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Toggle dark mode">
           Dark mode
         </button>
       </div>
-      <span id="last-refresh" class="last-refresh">Loading...</span>
+      <div class="status-inline">
+        <span id="last-refresh" class="last-refresh">Loading...</span>
+        <span id="powerpal-battery" class="last-refresh">Battery n/a</span>
+      </div>
     </section>
 
     <section class="panel grouped-chart-panel">
@@ -136,10 +142,9 @@
 
     <section class="panel">
       <div class="panel-header">
-        <h2>Cumulative stats</h2>
-        <span>Day totals that reset at Melbourne midnight.</span>
+        <h2>Energy totals</h2>
+        <span>Daily, weekly, and monthly totals.</span>
       </div>
-      <div id="cumulative-stats" class="stats-grid"></div>
       <div class="totals-table-wrap">
         <table class="totals-table">
           <thead>
@@ -147,6 +152,7 @@
               <th>Period</th>
               <th>Solar</th>
               <th>Grid</th>
+              <th>EV</th>
               <th>Net</th>
             </tr>
           </thead>

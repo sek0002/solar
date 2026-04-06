@@ -126,20 +126,18 @@ class PowerpalBlePoller:
         if len(data) < 6:
             raise ValueError(f"Expected at least 6 BLE bytes, received {len(data)}")
         timestamp = struct.unpack_from("<I", data, 0)[0]
-        total_pulses = struct.unpack_from("<H", data, 4)[0]
-        batch_minutes = max(1, self.settings.ble_reading_batch_size_minutes)
-        pulses_per_kwh = max(self.settings.ble_pulses_per_kwh, 1.0)
-        usage_watts = total_pulses * (1000.0 / pulses_per_kwh) / batch_minutes
-        calculated_kw = total_pulses * ((60.0 / batch_minutes) / pulses_per_kwh)
+        int_array = list(data)
+        pulse_sum = int_array[4] + int_array[5]
+        usage_watts = pulse_sum / 0.8
         utc_time = datetime.fromtimestamp(timestamp, tz=timezone.utc)
         return {
             "observed_at": utc_time.astimezone(self._melbourne_tz),
             "grid_usage_watts": usage_watts,
             "raw_bytes_hex": data.hex(),
-            "total_pulses": total_pulses,
-            "reading_batch_size_minutes": batch_minutes,
-            "pulses_per_kwh": pulses_per_kwh,
-            "calculated_kw": calculated_kw,
+            "pulse_byte_4": int_array[4],
+            "pulse_byte_5": int_array[5],
+            "pulse_sum": pulse_sum,
+            "original_test2_formula": "grid_usage_watts = (byte4 + byte5) / 0.8",
         }
 
     async def run(self) -> None:
@@ -714,6 +712,8 @@ class TuyaEvPoller:
         ])
         power_kw, power_code = first_number([
             (self.settings.tuya_power_code, self.settings.tuya_power_divisor),
+            ("power_total", 1000.0),
+            ("sigle_phase_power", 1000.0),
             ("cur_power", 1000.0),
             ("power", 1000.0),
             ("power_kw", 1.0),
@@ -725,6 +725,8 @@ class TuyaEvPoller:
         ])
         session_energy_kwh, session_energy_code = first_number([
             (self.settings.tuya_session_energy_code, self.settings.tuya_session_energy_divisor),
+            ("charge_energy_once", 100.0),
+            ("forward_energy_total", 100.0),
             ("add_ele", 100.0),
             ("charge_energy", 100.0),
         ])
@@ -733,7 +735,7 @@ class TuyaEvPoller:
             available_codes = ", ".join(sorted(by_code.keys()))
             raise RuntimeError(
                 "Tuya EV power code missing from status payload. Tried {codes}. Available codes: {available}".format(
-                    codes=", ".join([self.settings.tuya_power_code, "cur_power", "power", "power_kw"]),
+                    codes=", ".join([self.settings.tuya_power_code, "power_total", "sigle_phase_power", "cur_power", "power", "power_kw"]),
                     available=available_codes or "none",
                 )
             )

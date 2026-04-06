@@ -2,11 +2,12 @@ const hoursInput = document.querySelector("#hours");
 const windowPreset = document.querySelector("#window-preset");
 const startDateInput = document.querySelector("#start-date");
 const startTimeInput = document.querySelector("#start-time");
+const resetRangeButton = document.querySelector("#reset-range");
 const statusCards = document.querySelector("#status-cards");
 const latestValues = document.querySelector("#latest-values");
-const cumulativeStats = document.querySelector("#cumulative-stats");
 const totalsTableBody = document.querySelector("#totals-table-body");
 const refreshText = document.querySelector("#last-refresh");
+const batteryText = document.querySelector("#powerpal-battery");
 const themeToggle = document.querySelector("#theme-toggle");
 const bleChartElement = document.querySelector("#ble-chart");
 const cumulativeChartElement = document.querySelector("#cumulative-chart");
@@ -98,17 +99,29 @@ function syncWindowControls(hours) {
   return clampedHours;
 }
 
+function getDefaultStartDateTime(hours) {
+  const clampedHours = clampHours(hours);
+  const end = new Date(Date.now() + 3600000);
+  end.setSeconds(0, 0);
+  return new Date(end.getTime() - clampedHours * 3600000);
+}
+
+function applyDefaultStartDateTime(hours) {
+  const start = getDefaultStartDateTime(hours);
+  startDateInput.value = formatLocalDate(start);
+  startTimeInput.value = `${String(start.getHours()).padStart(2, "0")}:${String(start.getMinutes()).padStart(2, "0")}`;
+  persistDateTimeControls();
+}
+
 function ensureStartInputs() {
   if (startDateInput.value) {
     if (!startTimeInput.value) {
-      startTimeInput.value = "00:00";
+      const fallback = getDefaultStartDateTime(hoursInput.value || window.SOLAR_MONITOR_CONFIG.defaultHours || 24);
+      startTimeInput.value = `${String(fallback.getHours()).padStart(2, "0")}:${String(fallback.getMinutes()).padStart(2, "0")}`;
     }
     return;
   }
-  const now = new Date();
-  const start = new Date(now.getTime() - clampHours(hoursInput.value || window.SOLAR_MONITOR_CONFIG.defaultHours || 24) * 3600000);
-  startDateInput.value = formatLocalDate(start);
-  startTimeInput.value = `${String(start.getHours()).padStart(2, "0")}:${String(start.getMinutes()).padStart(2, "0")}`;
+  applyDefaultStartDateTime(hoursInput.value || window.SOLAR_MONITOR_CONFIG.defaultHours || 24);
 }
 
 function persistDateTimeControls() {
@@ -764,40 +777,26 @@ function getTodayAndWeekTotals(items) {
 
 function renderCumulativeStats(items, pollers = []) {
   const totals = getTodayAndWeekTotals(items);
-  const imputedCount = items.filter((item) => item.raw_payload && item.raw_payload.imputed).length;
-  const batteryPercent = getBleBatteryPercent(pollers);
-
-  cumulativeStats.innerHTML = [
-    formatStatCard("Solar today", `${totals.dailySolar.toFixed(2)} kWh`, "Integrated from site solar samples"),
-    formatStatCard("Grid today", `${totals.dailyGrid.toFixed(2)} kWh`, "Integrated from BLE grid samples"),
-    formatStatCard("Net today", `${totals.dailyNet.toFixed(2)} kWh`, "Solar minus grid"),
-    formatStatCard("Solar week", `${totals.weeklySolar.toFixed(2)} kWh`, "Rolling 7 day total"),
-    formatStatCard("Grid week", `${totals.weeklyGrid.toFixed(2)} kWh`, "Rolling 7 day total"),
-    formatStatCard("Solar month", `${totals.monthlySolar.toFixed(2)} kWh`, "Current calendar month"),
-    formatStatCard("Grid month", `${totals.monthlyGrid.toFixed(2)} kWh`, "Current calendar month"),
-    formatStatCard("EV today", `${totals.dailyEv.toFixed(2)} kWh`, "Integrated from Tuya EV charger power"),
-    formatStatCard("EV week", `${totals.weeklyEv.toFixed(2)} kWh`, "Rolling 7 day total"),
-    formatStatCard("EV month", `${totals.monthlyEv.toFixed(2)} kWh`, "Current calendar month"),
-    formatStatCard("Powerpal battery", batteryPercent === null ? "n/a" : `${batteryPercent}%`, `${imputedCount} estimated polls in range`)
-  ].join("");
-
   totalsTableBody.innerHTML = `
     <tr>
       <td>Daily</td>
       <td>${totals.dailySolar.toFixed(2)} kWh</td>
       <td>${totals.dailyGrid.toFixed(2)} kWh</td>
+      <td>${totals.dailyEv.toFixed(2)} kWh</td>
       <td>${totals.dailyNet.toFixed(2)} kWh</td>
     </tr>
     <tr>
       <td>Weekly</td>
       <td>${totals.weeklySolar.toFixed(2)} kWh</td>
       <td>${totals.weeklyGrid.toFixed(2)} kWh</td>
+      <td>${totals.weeklyEv.toFixed(2)} kWh</td>
       <td>${totals.weeklyNet.toFixed(2)} kWh</td>
     </tr>
     <tr>
       <td>Monthly</td>
       <td>${totals.monthlySolar.toFixed(2)} kWh</td>
       <td>${totals.monthlyGrid.toFixed(2)} kWh</td>
+      <td>${totals.monthlyEv.toFixed(2)} kWh</td>
       <td>${totals.monthlyNet.toFixed(2)} kWh</td>
     </tr>
   `;
@@ -1316,26 +1315,14 @@ async function refresh() {
 
     renderStatusCards(statusPayload.pollers);
     latestValues.innerHTML = statusPayload.latest_samples.map(formatMetricCard).join("");
+    const batteryPercent = getBleBatteryPercent(statusPayload.pollers);
+    batteryText.textContent = batteryPercent === null ? "Battery n/a" : `Battery ${batteryPercent}%`;
 
     if (!items.length) {
-      const batteryPercent = getBleBatteryPercent(statusPayload.pollers);
-      cumulativeStats.innerHTML = [
-        formatStatCard("Solar today", "0.00 kWh", "No samples in the selected window"),
-        formatStatCard("Grid today", "0.00 kWh", "No samples in the selected window"),
-        formatStatCard("Net today", "0.00 kWh", "No samples in the selected window"),
-        formatStatCard("Solar week", "0.00 kWh", "No samples in the selected window"),
-        formatStatCard("Grid week", "0.00 kWh", "No samples in the selected window"),
-        formatStatCard("Solar month", "0.00 kWh", "No samples in the selected window"),
-        formatStatCard("Grid month", "0.00 kWh", "No samples in the selected window"),
-        formatStatCard("EV today", "0.00 kWh", "No samples in the selected window"),
-        formatStatCard("EV week", "0.00 kWh", "No samples in the selected window"),
-        formatStatCard("EV month", "0.00 kWh", "No samples in the selected window"),
-        formatStatCard("Powerpal battery", batteryPercent === null ? "n/a" : `${batteryPercent}%`, "Latest BLE battery reading")
-      ].join("");
       totalsTableBody.innerHTML = `
-        <tr><td>Daily</td><td>0.00 kWh</td><td>0.00 kWh</td><td>0.00 kWh</td></tr>
-        <tr><td>Weekly</td><td>0.00 kWh</td><td>0.00 kWh</td><td>0.00 kWh</td></tr>
-        <tr><td>Monthly</td><td>0.00 kWh</td><td>0.00 kWh</td><td>0.00 kWh</td></tr>
+        <tr><td>Daily</td><td>0.00 kWh</td><td>0.00 kWh</td><td>0.00 kWh</td><td>0.00 kWh</td></tr>
+        <tr><td>Weekly</td><td>0.00 kWh</td><td>0.00 kWh</td><td>0.00 kWh</td><td>0.00 kWh</td></tr>
+        <tr><td>Monthly</td><td>0.00 kWh</td><td>0.00 kWh</td><td>0.00 kWh</td><td>0.00 kWh</td></tr>
       `;
       renderEmptyCharts();
       refreshText.textContent = "No data in selected window";
@@ -1351,6 +1338,7 @@ async function refresh() {
     console.error("Refresh failed", error);
     renderEmptyCharts();
     refreshText.textContent = "Refresh failed";
+    batteryText.textContent = "Battery n/a";
   }
 }
 
@@ -1410,6 +1398,11 @@ hoursInput.addEventListener("change", () => {
     persistDateTimeControls();
     scheduleRefresh(0);
   });
+});
+
+resetRangeButton.addEventListener("click", () => {
+  applyDefaultStartDateTime(hoursInput.value || window.SOLAR_MONITOR_CONFIG.defaultHours || 24);
+  scheduleRefresh(0);
 });
 
 window.addEventListener("resize", resizeCharts);
