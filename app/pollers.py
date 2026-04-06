@@ -11,7 +11,7 @@ from typing import Any, Optional
 
 import httpx
 import pytz
-from bleak import BleakClient, BleakError, BleakScanner
+from bleak import BleakClient, BleakError
 
 from app.config import Settings
 from app.database import Database
@@ -90,35 +90,6 @@ class PowerpalBlePoller:
     def convert_pairing_code(original_pairing_code: str) -> bytes:
         return int(original_pairing_code).to_bytes(4, byteorder="little")
 
-    async def _resolve_powerpal_device(self) -> Any:
-        devices = await BleakScanner.discover(
-            timeout=self.settings.ble_connection_timeout_seconds,
-            return_adv=True,
-        )
-
-        exact_match = None
-        name_match = None
-        for _, (device, _) in devices.items():
-            device_name = device.name or ""
-            if device.address.lower() == self.settings.ble_mac.lower():
-                exact_match = device
-                break
-            if "powerpal" in device_name.lower() and name_match is None:
-                name_match = device
-
-        if exact_match is not None:
-            return exact_match
-
-        if name_match is not None:
-            LOGGER.warning(
-                "Using Powerpal device matched by name instead of exact MAC: requested=%s resolved=%s",
-                self.settings.ble_mac,
-                getattr(name_match, "address", "unknown"),
-            )
-            return name_match
-
-        raise BleakError(f"Could not find Powerpal device during scan for {self.settings.ble_mac}")
-
     def _parse_notification(self, data: bytearray) -> dict[str, Any]:
         if len(data) < 6:
             raise ValueError(f"Expected at least 6 BLE bytes, received {len(data)}")
@@ -179,41 +150,20 @@ class PowerpalBlePoller:
 
     async def _run_session(self) -> None:
         batch_size_bytes = int(self.settings.ble_reading_batch_size_minutes).to_bytes(4, byteorder="little")
-        resolved_device = await self._resolve_powerpal_device()
 
         def notification_handler(_: Any, data: bytearray) -> None:
             asyncio.create_task(self._on_notification(bytearray(data)))
 
-        async with BleakClient(resolved_device, timeout=self.settings.ble_connection_timeout_seconds) as client:
-            try:
-                paired = await client.pair()
-                LOGGER.info("BLE pair result: %s", paired)
-            except Exception as exc:
-                LOGGER.debug("BLE pair step skipped or unsupported: %s", exc)
-
-            await client.write_gatt_char(
-                PAIRING_CODE_CHAR,
-                self.convert_pairing_code(self.settings.ble_pairing_code),
-                response=False,
+        client = BleakClient(self.settings.ble_mac)
+        await client.connect(timeout=self.settings.ble_connection_timeout_seconds)
+        try:
+            await self.statuses.update(
+                "ble",
+                state="connecting",
+                details={"mac": self.settings.ble_mac},
             )
-            await asyncio.sleep(2.0)
 
-            current_batch_minutes = None
             battery_level = None
-            try:
-                batch_value = await client.read_gatt_char(POWERPAL_FREQ_CHAR)
-                if len(batch_value) >= 4:
-                    current_batch_minutes = int.from_bytes(batch_value[:4], byteorder="little", signed=False)
-            except Exception as exc:
-                LOGGER.debug("Unable to read Powerpal batch size", exc_info=exc)
-
-            if current_batch_minutes != self.settings.ble_reading_batch_size_minutes:
-                await client.write_gatt_char(
-                    POWERPAL_FREQ_CHAR,
-                    batch_size_bytes,
-                    response=False,
-                )
-
             try:
                 battery_value = await client.read_gatt_char(BATTERY_CHAR)
                 if battery_value:
@@ -221,14 +171,29 @@ class PowerpalBlePoller:
             except Exception as exc:
                 LOGGER.debug("Unable to read Powerpal battery level", exc_info=exc)
 
+            await client.write_gatt_char(
+                PAIRING_CODE_CHAR,
+                self.convert_pairing_code(self.settings.ble_pairing_code),
+                response=True,
+            )
+            await client.write_gatt_char(
+                POWERPAL_FREQ_CHAR,
+                batch_size_bytes,
+                response=True,
+            )
+
+            current_batch_minutes = self.settings.ble_reading_batch_size_minutes
+            try:
+                await client.read_gatt_char(NOTIFY_CHAR)
+            except Exception as exc:
+                LOGGER.debug("Initial notify characteristic read failed", exc_info=exc)
+
             await client.start_notify(NOTIFY_CHAR, notification_handler)
             await self.statuses.update(
                 "ble",
                 state="connected",
                 details={
                     "mac": self.settings.ble_mac,
-                    "resolved_address": getattr(resolved_device, "address", self.settings.ble_mac),
-                    "resolved_name": getattr(resolved_device, "name", None),
                     "configured_batch_minutes": self.settings.ble_reading_batch_size_minutes,
                     "device_batch_minutes": current_batch_minutes,
                     "battery_percent": battery_level,
@@ -243,6 +208,8 @@ class PowerpalBlePoller:
                     await client.stop_notify(NOTIFY_CHAR)
                 except Exception:
                     LOGGER.debug("Unable to stop bleak notifications cleanly", exc_info=True)
+        finally:
+            await client.disconnect()
 
     async def _record_error_fallback(self, error_message: str) -> None:
         average_grid = self.database.get_recent_average(
@@ -281,8 +248,6 @@ class PowerpalBlePoller:
             details={
                 "mac": self.settings.ble_mac,
                 "battery_percent": self._extract_existing_status_detail("battery_percent"),
-                "resolved_address": self._extract_existing_status_detail("resolved_address"),
-                "resolved_name": self._extract_existing_status_detail("resolved_name"),
                 "configured_batch_minutes": self._extract_existing_status_detail("configured_batch_minutes"),
                 "device_batch_minutes": self._extract_existing_status_detail("device_batch_minutes"),
                 "latest_grid_usage_watts": sample["grid_usage_watts"],
