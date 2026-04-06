@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 import asyncio
 import sys
 from bleak import BleakClient, BleakError, BleakScanner
