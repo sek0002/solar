@@ -220,6 +220,101 @@ function buildRateHoverTemplate(label) {
   return `<b>${label}</b><br>%{x}<br>%{y:.3f} kW/hr<br>%{customdata:.1f} W/min<extra></extra>`;
 }
 
+function getMinuteOfWeek(dateLike) {
+  const parts = getZonedParts(dateLike);
+  const date = new Date(
+    Number(parts.year),
+    Number(parts.month) - 1,
+    Number(parts.day),
+    Number(parts.hour),
+    Number(parts.minute),
+    0,
+    0
+  );
+  const day = (date.getDay() + 6) % 7;
+  return (day * 24 * 60) + (date.getHours() * 60) + date.getMinutes();
+}
+
+function buildFutureTimeline() {
+  const now = new Date();
+  const points = [];
+  for (let offsetMinutes = 10; offsetMinutes <= 60; offsetMinutes += 10) {
+    points.push(new Date(now.getTime() + offsetMinutes * 60000));
+  }
+  return points;
+}
+
+function getRecentSlope(series, valueKey) {
+  const nowMs = Date.now();
+  const pastPoints = series
+    .filter((item) => new Date(item.observed_at).getTime() <= nowMs)
+    .slice(-4);
+
+  if (pastPoints.length < 2) {
+    return null;
+  }
+
+  const first = pastPoints[0];
+  const last = pastPoints[pastPoints.length - 1];
+  const deltaMinutes = (new Date(last.observed_at) - new Date(first.observed_at)) / 60000;
+  if (deltaMinutes <= 0) {
+    return null;
+  }
+
+  const startValue = Number(first[valueKey]);
+  const endValue = Number(last[valueKey]);
+  return {
+    lastObservedAt: new Date(last.observed_at),
+    lastValue: endValue,
+    slopePerMinute: (endValue - startValue) / deltaMinutes
+  };
+}
+
+function buildProjectionSeries(series, valueKey) {
+  const slope = getRecentSlope(series, valueKey);
+  if (!slope) {
+    return [];
+  }
+
+  return buildFutureTimeline().map((futureTime) => {
+    const deltaMinutes = (futureTime - slope.lastObservedAt) / 60000;
+    return {
+      observed_at: futureTime.toISOString(),
+      value: slope.lastValue + (slope.slopePerMinute * deltaMinutes)
+    };
+  });
+}
+
+function buildWeeklyMeanSeries(historySeries, valueKey) {
+  if (!historySeries.length) {
+    return [];
+  }
+
+  const toleranceMinutes = 20;
+  return buildFutureTimeline().map((futureTime) => {
+    const targetMinute = getMinuteOfWeek(futureTime);
+    const matches = historySeries.filter((item) => {
+      const historicalMinute = getMinuteOfWeek(item.observed_at);
+      const delta = Math.abs(historicalMinute - targetMinute);
+      const wrappedDelta = Math.min(delta, (7 * 24 * 60) - delta);
+      return wrappedDelta <= toleranceMinutes;
+    });
+
+    if (!matches.length) {
+      return {
+        observed_at: futureTime.toISOString(),
+        value: null
+      };
+    }
+
+    const averageValue = matches.reduce((sum, item) => sum + Number(item[valueKey]), 0) / matches.length;
+    return {
+      observed_at: futureTime.toISOString(),
+      value: averageValue
+    };
+  });
+}
+
 function buildNowLine(xValue) {
   const dark = getTheme() === "dark";
   return {
@@ -437,33 +532,58 @@ function buildNetItems(items) {
     .filter((item) => item.source === "ble" && item.grid_usage_watts !== null)
     .sort((left, right) => new Date(left.observed_at) - new Date(right.observed_at));
 
-  const netItems = [];
-  let bleIndex = 0;
+  const timeline = items
+    .filter((item) =>
+      (item.source === "local_site" && item.solar_generation_watts !== null) ||
+      (item.source === "ble" && item.grid_usage_watts !== null)
+    )
+    .sort((left, right) => new Date(left.observed_at) - new Date(right.observed_at));
 
-  for (const solarItem of solarItems) {
-    const solarTime = new Date(solarItem.observed_at).getTime();
+  const netItems = [];
+  let latestSolar = null;
+  let latestGrid = null;
+  let latestSolarImputed = false;
+  let latestGridImputed = false;
+  let solarIndex = 0;
+  let gridIndex = 0;
+
+  for (const point of timeline) {
+    const pointTime = new Date(point.observed_at).getTime();
 
     while (
-      bleIndex + 1 < bleGridItems.length &&
-      new Date(bleGridItems[bleIndex + 1].observed_at).getTime() <= solarTime
+      solarIndex < solarItems.length &&
+      new Date(solarItems[solarIndex].observed_at).getTime() <= pointTime
     ) {
-      bleIndex += 1;
+      latestSolar = Number(solarItems[solarIndex].solar_generation_watts);
+      latestSolarImputed = Boolean(solarItems[solarIndex].raw_payload && solarItems[solarIndex].raw_payload.imputed);
+      solarIndex += 1;
     }
 
-    const gridItem = bleGridItems[bleIndex];
-    if (!gridItem) {
+    while (
+      gridIndex < bleGridItems.length &&
+      new Date(bleGridItems[gridIndex].observed_at).getTime() <= pointTime
+    ) {
+      latestGrid = Number(bleGridItems[gridIndex].grid_usage_watts);
+      latestGridImputed = Boolean(bleGridItems[gridIndex].raw_payload && bleGridItems[gridIndex].raw_payload.imputed);
+      gridIndex += 1;
+    }
+
+    if (latestSolar === null || latestGrid === null) {
       continue;
     }
-    if (new Date(gridItem.observed_at).getTime() > solarTime) {
+
+    const lastNet = netItems.length ? netItems[netItems.length - 1] : null;
+    const nextCombinedValue = latestSolar + latestGrid;
+    if (lastNet && lastNet.observed_at === point.observed_at && lastNet.net_power_watts === nextCombinedValue) {
       continue;
     }
 
     netItems.push({
-      observed_at: solarItem.observed_at,
-      solar_generation_watts: Number(solarItem.solar_generation_watts),
-      grid_usage_watts: Number(gridItem.grid_usage_watts),
-      net_power_watts: Number(solarItem.solar_generation_watts) - Number(gridItem.grid_usage_watts),
-      imputed: Boolean((solarItem.raw_payload && solarItem.raw_payload.imputed) || (gridItem.raw_payload && gridItem.raw_payload.imputed))
+      observed_at: point.observed_at,
+      solar_generation_watts: latestSolar,
+      grid_usage_watts: latestGrid,
+      net_power_watts: nextCombinedValue,
+      imputed: latestSolarImputed || latestGridImputed
     });
   }
 
@@ -611,12 +731,14 @@ function renderCumulativeStats(items, pollers = []) {
   `;
 }
 
-function buildRateChart(element, chartKey, title, items, valueKey, colors) {
+function buildRateChart(element, chartKey, title, items, valueKey, colors, historySeries = []) {
   const chartTheme = buildChartTheme();
   const dark = getTheme() === "dark";
   const xValues = items.map((item) => toChartTime(item.observed_at));
   const yKw = items.map((item) => ratePerMinuteToKwPerHour(item[valueKey]));
   const yRate = items.map((item) => Number(item[valueKey]));
+  const projectedSeries = buildProjectionSeries(items, valueKey);
+  const weeklyMeanSeries = buildWeeklyMeanSeries(historySeries, valueKey);
   const nowX = xValues.length ? toChartTime(new Date()) : null;
   const traces = [
     {
@@ -639,6 +761,25 @@ function buildRateChart(element, chartKey, title, items, valueKey, colors) {
       showlegend: false,
       hoverinfo: "skip",
       line: { color: "rgba(0,0,0,0)", width: 0 }
+    },
+    {
+      x: projectedSeries.map((item) => toChartTime(item.observed_at)),
+      y: projectedSeries.map((item) => ratePerMinuteToKwPerHour(item.value)),
+      customdata: projectedSeries.map((item) => Number(item.value)),
+      mode: "lines",
+      name: `${title} trend`,
+      line: { color: colors.line, width: 1.5, dash: "dot" },
+      hovertemplate: buildRateHoverTemplate(`${title} trend`)
+    },
+    {
+      x: weeklyMeanSeries.filter((item) => item.value !== null).map((item) => toChartTime(item.observed_at)),
+      y: weeklyMeanSeries.filter((item) => item.value !== null).map((item) => ratePerMinuteToKwPerHour(item.value)),
+      customdata: weeklyMeanSeries.filter((item) => item.value !== null).map((item) => Number(item.value)),
+      mode: "lines",
+      name: `${title} weekly mean`,
+      line: { color: colors.line, width: 1.2, dash: "dash" },
+      opacity: 0.35,
+      hovertemplate: buildRateHoverTemplate(`${title} weekly mean`)
     }
   ];
 
@@ -653,7 +794,10 @@ function buildRateChart(element, chartKey, title, items, valueKey, colors) {
     },
     yaxis: {
       ...chartTheme.yaxis,
-      title: getAxisTitleRate()
+      title: getAxisTitleRate(),
+      zeroline: true,
+      zerolinecolor: dark ? "rgba(124, 147, 180, 0.42)" : "rgba(164, 179, 201, 0.42)",
+      rangemode: "tozero"
     },
     yaxis2: {
       title: getAxisTitleSubRate(),
@@ -675,15 +819,25 @@ function buildRateChart(element, chartKey, title, items, valueKey, colors) {
   captureChartState(element, chartKey);
 }
 
-function renderFirstRowCharts(items) {
+function renderFirstRowCharts(items, historyItems) {
   const dark = getTheme() === "dark";
   const bleGrid = items
+    .filter((item) => item.source === "ble" && item.grid_usage_watts !== null)
+    .sort((left, right) => new Date(left.observed_at) - new Date(right.observed_at));
+  const bleGridHistory = historyItems
     .filter((item) => item.source === "ble" && item.grid_usage_watts !== null)
     .sort((left, right) => new Date(left.observed_at) - new Date(right.observed_at));
   const siteSolar = items
     .filter((item) => item.source === "local_site" && item.solar_generation_watts !== null)
     .sort((left, right) => new Date(left.observed_at) - new Date(right.observed_at));
+  const siteSolarHistory = historyItems
+    .filter((item) => item.source === "local_site" && item.solar_generation_watts !== null)
+    .sort((left, right) => new Date(left.observed_at) - new Date(right.observed_at));
   const netItems = buildNetItems(items).map((item) => ({
+    observed_at: item.observed_at,
+    net_rate: item.net_power_watts
+  }));
+  const netHistoryItems = buildNetItems(historyItems).map((item) => ({
     observed_at: item.observed_at,
     net_rate: item.net_power_watts
   }));
@@ -691,15 +845,15 @@ function renderFirstRowCharts(items) {
   buildRateChart(bleChartElement, "ble-rate", "BLE grid", bleGrid, "grid_usage_watts", {
     line: dark ? "#7fb0ff" : "#6f96d8",
     fill: dark ? "rgba(127, 176, 255, 0.16)" : "rgba(111, 150, 216, 0.17)"
-  });
+  }, bleGridHistory);
   buildRateChart(solarChartElement, "solar-rate", "Site solar", siteSolar, "solar_generation_watts", {
     line: dark ? "#8ee29d" : "#7cc98a",
     fill: dark ? "rgba(142, 226, 157, 0.15)" : "rgba(124, 201, 138, 0.14)"
-  });
-  buildRateChart(netChartElement, "net-rate", "Net balance", netItems, "net_rate", {
+  }, siteSolarHistory);
+  buildRateChart(netChartElement, "net-rate", "Combined total", netItems, "net_rate", {
     line: dark ? "#f08de0" : "#da78c6",
     fill: dark ? "rgba(240, 141, 224, 0.16)" : "rgba(218, 120, 198, 0.16)"
-  });
+  }, netHistoryItems);
 }
 
 function renderCumulativeChart(items) {
@@ -898,7 +1052,7 @@ function renderEmptyCharts() {
 
   emptyRateChart(bleChartElement, "ble-rate", "BLE grid");
   emptyRateChart(solarChartElement, "solar-rate", "Site solar");
-  emptyRateChart(netChartElement, "net-rate", "Net balance");
+  emptyRateChart(netChartElement, "net-rate", "Combined total");
   emptyEnergyChart(cumulativeChartElement, "cumulative", "Cumulative energy");
   emptyEnergyChart(hourlyChartElement, "hourly-bars", "Hourly cumulative split");
   emptyEnergyChart(dailyChartElement, "daily-bars", "Daily cumulative split");
@@ -913,18 +1067,21 @@ async function refresh() {
     const start = buildLocalDateTime(selectedDate, selectedTime);
     const safeStart = Number.isNaN(start.getTime()) ? new Date() : start;
     const end = new Date(safeStart.getTime() + hours * 3600000);
-    const [statusResponse, samplesResponse] = await Promise.all([
+    const [statusResponse, samplesResponse, historyResponse] = await Promise.all([
       fetch("/api/status"),
-      fetch(`/api/samples?hours=${hours}&start=${encodeURIComponent(safeStart.toISOString())}&end=${encodeURIComponent(end.toISOString())}`)
+      fetch(`/api/samples?hours=${hours}&start=${encodeURIComponent(safeStart.toISOString())}&end=${encodeURIComponent(end.toISOString())}`),
+      fetch(`/api/samples?hours=168&end=${encodeURIComponent(new Date().toISOString())}`)
     ]);
 
-    if (!statusResponse.ok || !samplesResponse.ok) {
-      throw new Error(`HTTP ${statusResponse.status}/${samplesResponse.status}`);
+    if (!statusResponse.ok || !samplesResponse.ok || !historyResponse.ok) {
+      throw new Error(`HTTP ${statusResponse.status}/${samplesResponse.status}/${historyResponse.status}`);
     }
 
     const statusPayload = await statusResponse.json();
     const samplesPayload = await samplesResponse.json();
+    const historyPayload = await historyResponse.json();
     const items = Array.isArray(samplesPayload.items) ? samplesPayload.items : [];
+    const historyItems = Array.isArray(historyPayload.items) ? historyPayload.items : [];
 
     renderStatusCards(statusPayload.pollers);
     latestValues.innerHTML = statusPayload.latest_samples.map(formatMetricCard).join("");
@@ -949,7 +1106,7 @@ async function refresh() {
     }
 
     renderCumulativeStats(items, statusPayload.pollers);
-    renderFirstRowCharts(items);
+    renderFirstRowCharts(items, historyItems);
     renderCumulativeChart(items);
     renderEnergyBreakdowns(items);
     refreshText.textContent = `Updated ${new Date().toLocaleTimeString("en-AU", { timeZone: appTimezone })}`;
