@@ -11,7 +11,7 @@ from typing import Any, Optional
 
 import httpx
 import pytz
-from bleak import BleakClient, BleakError
+from bleak import BleakClient, BleakError, BleakScanner
 
 from app.config import Settings
 from app.database import Database
@@ -90,6 +90,35 @@ class PowerpalBlePoller:
     def convert_pairing_code(original_pairing_code: str) -> bytes:
         return int(original_pairing_code).to_bytes(4, byteorder="little")
 
+    async def _resolve_powerpal_device(self) -> Any:
+        devices = await BleakScanner.discover(
+            timeout=self.settings.ble_connection_timeout_seconds,
+            return_adv=True,
+        )
+
+        exact_match = None
+        name_match = None
+        for _, (device, _) in devices.items():
+            device_name = device.name or ""
+            if device.address.lower() == self.settings.ble_mac.lower():
+                exact_match = device
+                break
+            if "powerpal" in device_name.lower() and name_match is None:
+                name_match = device
+
+        if exact_match is not None:
+            return exact_match
+
+        if name_match is not None:
+            LOGGER.warning(
+                "Using Powerpal device matched by name instead of exact MAC: requested=%s resolved=%s",
+                self.settings.ble_mac,
+                getattr(name_match, "address", "unknown"),
+            )
+            return name_match
+
+        raise BleakError(f"Could not find Powerpal device during scan for {self.settings.ble_mac}")
+
     def _parse_notification(self, data: bytearray) -> dict[str, Any]:
         if len(data) < 6:
             raise ValueError(f"Expected at least 6 BLE bytes, received {len(data)}")
@@ -150,11 +179,12 @@ class PowerpalBlePoller:
 
     async def _run_session(self) -> None:
         batch_size_bytes = int(self.settings.ble_reading_batch_size_minutes).to_bytes(4, byteorder="little")
+        resolved_device = await self._resolve_powerpal_device()
 
         def notification_handler(_: Any, data: bytearray) -> None:
             asyncio.create_task(self._on_notification(bytearray(data)))
 
-        async with BleakClient(self.settings.ble_mac, timeout=self.settings.ble_connection_timeout_seconds) as client:
+        async with BleakClient(resolved_device, timeout=self.settings.ble_connection_timeout_seconds) as client:
             try:
                 paired = await client.pair()
                 LOGGER.info("BLE pair result: %s", paired)
@@ -197,6 +227,8 @@ class PowerpalBlePoller:
                 state="connected",
                 details={
                     "mac": self.settings.ble_mac,
+                    "resolved_address": getattr(resolved_device, "address", self.settings.ble_mac),
+                    "resolved_name": getattr(resolved_device, "name", None),
                     "configured_batch_minutes": self.settings.ble_reading_batch_size_minutes,
                     "device_batch_minutes": current_batch_minutes,
                     "battery_percent": battery_level,
@@ -248,10 +280,22 @@ class PowerpalBlePoller:
             mark_success=True,
             details={
                 "mac": self.settings.ble_mac,
+                "battery_percent": self._extract_existing_status_detail("battery_percent"),
+                "resolved_address": self._extract_existing_status_detail("resolved_address"),
+                "resolved_name": self._extract_existing_status_detail("resolved_name"),
+                "configured_batch_minutes": self._extract_existing_status_detail("configured_batch_minutes"),
+                "device_batch_minutes": self._extract_existing_status_detail("device_batch_minutes"),
                 "latest_grid_usage_watts": sample["grid_usage_watts"],
                 "latest_observed_at": sample["observed_at"].isoformat(),
             },
         )
+
+    def _extract_existing_status_detail(self, key: str) -> Any:
+        statuses = getattr(self.statuses, "_statuses", {})
+        status = statuses.get("ble")
+        if not status:
+            return None
+        return status.details.get(key)
 
 
 class LocalSitePoller:
