@@ -492,7 +492,13 @@ function computeRampSeries(series, valueKey) {
   }));
 }
 
-function renderCumulativeStats(items) {
+function getBleBatteryPercent(pollers) {
+  const blePoller = (pollers || []).find((item) => item.name === "ble");
+  const batteryPercent = blePoller && blePoller.details ? blePoller.details.battery_percent : null;
+  return Number.isFinite(Number(batteryPercent)) ? Number(batteryPercent) : null;
+}
+
+function renderCumulativeStats(items, pollers = []) {
   const solarItems = items
     .filter((item) => item.source === "local_site" && item.solar_generation_watts !== null)
     .sort((left, right) => new Date(left.observed_at) - new Date(right.observed_at));
@@ -515,12 +521,14 @@ function renderCumulativeStats(items) {
   const latestSolarKwh = solarKwh.length ? solarKwh[solarKwh.length - 1].cumulative_kwh : 0;
   const latestGridKwh = gridKwh.length ? gridKwh[gridKwh.length - 1].cumulative_kwh : 0;
   const latestExportKwh = exportKwh.length ? exportKwh[exportKwh.length - 1].cumulative_kwh : 0;
+  const batteryPercent = getBleBatteryPercent(pollers);
 
   cumulativeStats.innerHTML = [
     formatStatCard("Solar today", `${latestSolarKwh.toFixed(2)} kWh`, "Resets at Melbourne midnight"),
     formatStatCard("Grid today", `${latestGridKwh.toFixed(2)} kWh`, "Resets at Melbourne midnight"),
     formatStatCard("Net export today", `${latestExportKwh.toFixed(2)} kWh`, "Positive solar minus grid since Melbourne midnight"),
-    formatStatCard("Estimated polls", `${imputedCount}`, "Readings imputed from the previous 3 samples")
+    formatStatCard("Estimated polls", `${imputedCount}`, "Readings imputed from the previous 3 samples"),
+    formatStatCard("Powerpal battery", batteryPercent === null ? "n/a" : `${batteryPercent}%`, "Latest BLE battery reading")
   ].join("");
 }
 
@@ -863,18 +871,20 @@ async function refresh() {
     latestValues.innerHTML = statusPayload.latest_samples.map(formatMetricCard).join("");
 
     if (!items.length) {
+      const batteryPercent = getBleBatteryPercent(statusPayload.pollers);
       cumulativeStats.innerHTML = [
         formatStatCard("Solar today", "0.00 kWh", "No samples in the selected window"),
         formatStatCard("Grid today", "0.00 kWh", "No samples in the selected window"),
         formatStatCard("Net export today", "0.00 kWh", "No samples in the selected window"),
-        formatStatCard("Estimated polls", "0", "No samples in the selected window")
+        formatStatCard("Estimated polls", "0", "No samples in the selected window"),
+        formatStatCard("Powerpal battery", batteryPercent === null ? "n/a" : `${batteryPercent}%`, "Latest BLE battery reading")
       ].join("");
       renderEmptyCharts();
       refreshText.textContent = "No data in selected window";
       return;
     }
 
-    renderCumulativeStats(items);
+    renderCumulativeStats(items, statusPayload.pollers);
     renderChart(items);
     renderNetChart(items);
     renderCumulativeChart(items);

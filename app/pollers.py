@@ -22,6 +22,7 @@ LOGGER = logging.getLogger(__name__)
 PAIRING_CODE_CHAR = "59da0011-12f4-25a6-7d4f-55961dce4205"
 POWERPAL_FREQ_CHAR = "59da0013-12f4-25a6-7d4f-55961dce4205"
 NOTIFY_CHAR = "59da0001-12f4-25a6-7d4f-55961dce4205"
+BATTERY_CHAR = "00002a19-0000-1000-8000-00805f9b34fb"
 
 
 @dataclass
@@ -154,17 +155,53 @@ class PowerpalBlePoller:
             asyncio.create_task(self._on_notification(bytearray(data)))
 
         async with BleakClient(self.settings.ble_mac, timeout=self.settings.ble_connection_timeout_seconds) as client:
+            try:
+                paired = await client.pair()
+                LOGGER.info("BLE pair result: %s", paired)
+            except Exception as exc:
+                LOGGER.debug("BLE pair step skipped or unsupported: %s", exc)
+
             await client.write_gatt_char(
                 PAIRING_CODE_CHAR,
                 self.convert_pairing_code(self.settings.ble_pairing_code),
                 response=False,
             )
-            await client.write_gatt_char(
-                POWERPAL_FREQ_CHAR,
-                batch_size_bytes,
-                response=False,
-            )
+            await asyncio.sleep(2.0)
+
+            current_batch_minutes = None
+            battery_level = None
+            try:
+                batch_value = await client.read_gatt_char(POWERPAL_FREQ_CHAR)
+                if len(batch_value) >= 4:
+                    current_batch_minutes = int.from_bytes(batch_value[:4], byteorder="little", signed=False)
+            except Exception as exc:
+                LOGGER.debug("Unable to read Powerpal batch size", exc_info=exc)
+
+            if current_batch_minutes != self.settings.ble_reading_batch_size_minutes:
+                await client.write_gatt_char(
+                    POWERPAL_FREQ_CHAR,
+                    batch_size_bytes,
+                    response=False,
+                )
+
+            try:
+                battery_value = await client.read_gatt_char(BATTERY_CHAR)
+                if battery_value:
+                    battery_level = int(battery_value[0])
+            except Exception as exc:
+                LOGGER.debug("Unable to read Powerpal battery level", exc_info=exc)
+
             await client.start_notify(NOTIFY_CHAR, notification_handler)
+            await self.statuses.update(
+                "ble",
+                state="connected",
+                details={
+                    "mac": self.settings.ble_mac,
+                    "configured_batch_minutes": self.settings.ble_reading_batch_size_minutes,
+                    "device_batch_minutes": current_batch_minutes,
+                    "battery_percent": battery_level,
+                },
+            )
 
             try:
                 while not self._stopped.is_set():
