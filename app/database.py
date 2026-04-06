@@ -56,7 +56,7 @@ class Database:
         solar_generation_watts: Optional[float],
         raw_payload: Optional[dict[str, Any]] = None,
     ) -> None:
-        payload = json.dumps(raw_payload) if raw_payload is not None else None
+        payload = json.dumps(raw_payload, default=self._json_default) if raw_payload is not None else None
         with self._lock, self._connect() as connection:
             connection.execute(
                 """
@@ -76,6 +76,12 @@ class Database:
                     payload,
                 ),
             )
+
+    @staticmethod
+    def _json_default(value: Any) -> Any:
+        if isinstance(value, datetime):
+            return value.isoformat()
+        raise TypeError(f"Object of type {type(value).__name__} is not JSON serializable")
 
     def get_recent_samples(self, *, hours: int, limit: int) -> list[dict[str, Any]]:
         since = datetime.now(timezone.utc) - timedelta(hours=hours)
