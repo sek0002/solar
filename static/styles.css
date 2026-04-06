@@ -183,6 +183,11 @@ input[type="range"] {
   margin-bottom: 20px;
 }
 
+.charts-grid-two {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-bottom: 20px;
+}
+
 .status-card,
 .metric-card,
 .stat-card {
@@ -275,7 +280,7 @@ input[type="range"] {
 }
 
 .charts-grid-nested {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
 }
 
@@ -304,11 +309,10 @@ input[type="range"] {
 }
 
 #ble-chart,
-#solar-chart,
-#net-chart,
 #cumulative-chart,
 #hourly-chart,
-#daily-chart {
+#weekly-chart,
+#monthly-chart {
   width: 100%;
   height: 300px;
   border-radius: 18px;
@@ -373,6 +377,10 @@ input[type="range"] {
   }
 
   .charts-grid-three {
+    grid-template-columns: 1fr;
+  }
+
+  .charts-grid-two {
     grid-template-columns: 1fr;
   }
 

@@ -48,67 +48,61 @@
     <section class="panel grouped-chart-panel">
       <div class="panel-header">
         <div>
-          <h2>Live line charts</h2>
-          <span>BLE grid, site solar, and combined total grouped in one card.</span>
+          <h2>Live energy charts</h2>
+          <span>BLE and site solar share one chart, with cumulative energy beside it.</span>
         </div>
       </div>
-      <div class="charts-grid charts-grid-three charts-grid-nested">
+      <div class="charts-grid charts-grid-two charts-grid-nested">
         <section class="chart-panel-subsection">
           <div class="subchart-header">
-            <h3>BLE grid</h3>
-            <span>BLE grid rate with kW/hr primary axis.</span>
+            <h3>BLE and site solar</h3>
+            <span>BLE grid and site solar overlaid with kW/hr primary axis.</span>
           </div>
           <div id="ble-chart"></div>
         </section>
 
         <section class="chart-panel-subsection">
           <div class="subchart-header">
-            <h3>Site solar</h3>
-            <span>Local site solar rate with kW/hr primary axis.</span>
+            <h3>Cumulative energy</h3>
+            <span>BLE grid and site solar daily cumulative totals.</span>
           </div>
-          <div id="solar-chart"></div>
-        </section>
-
-        <section class="chart-panel-subsection">
-          <div class="subchart-header">
-            <h3>Combined total</h3>
-            <span>BLE grid plus site solar.</span>
-          </div>
-          <div id="net-chart"></div>
+          <div id="cumulative-chart"></div>
         </section>
       </div>
     </section>
 
-    <section class="charts-grid charts-grid-three">
-      <section class="panel chart-panel">
-        <div class="panel-header">
-          <div>
-            <h2>Cumulative energy</h2>
-            <span>BLE grid and site solar daily cumulative totals.</span>
-          </div>
+    <section class="panel grouped-chart-panel">
+      <div class="panel-header">
+        <div>
+          <h2>Cumulative splits</h2>
+          <span>Hourly, weekly, and monthly stacked energy splits in one card.</span>
         </div>
-        <div id="cumulative-chart"></div>
-      </section>
-
-      <section class="panel chart-panel">
-        <div class="panel-header">
-          <div>
-            <h2>Hourly cumulative split</h2>
+      </div>
+      <div class="charts-grid charts-grid-three charts-grid-nested">
+        <section class="chart-panel-subsection">
+          <div class="subchart-header">
+            <h3>Hourly cumulative split</h3>
             <span>Hourly stacked energy split between BLE grid and site solar.</span>
           </div>
-        </div>
-        <div id="hourly-chart"></div>
-      </section>
+          <div id="hourly-chart"></div>
+        </section>
 
-      <section class="panel chart-panel">
-        <div class="panel-header">
-          <div>
-            <h2>Daily cumulative split</h2>
-            <span>Daily stacked energy split between BLE grid and site solar.</span>
+        <section class="chart-panel-subsection">
+          <div class="subchart-header">
+            <h3>Weekly cumulative split</h3>
+            <span>Weekly stacked energy split between BLE grid and site solar.</span>
           </div>
-        </div>
-        <div id="daily-chart"></div>
-      </section>
+          <div id="weekly-chart"></div>
+        </section>
+
+        <section class="chart-panel-subsection">
+          <div class="subchart-header">
+            <h3>Monthly cumulative split</h3>
+            <span>Monthly stacked energy split between BLE grid and site solar.</span>
+          </div>
+          <div id="monthly-chart"></div>
+        </section>
+      </div>
     </section>
 
     <section class="grid">

@@ -9,11 +9,10 @@ const totalsTableBody = document.querySelector("#totals-table-body");
 const refreshText = document.querySelector("#last-refresh");
 const themeToggle = document.querySelector("#theme-toggle");
 const bleChartElement = document.querySelector("#ble-chart");
-const solarChartElement = document.querySelector("#solar-chart");
-const netChartElement = document.querySelector("#net-chart");
 const cumulativeChartElement = document.querySelector("#cumulative-chart");
 const hourlyChartElement = document.querySelector("#hourly-chart");
-const dailyChartElement = document.querySelector("#daily-chart");
+const weeklyChartElement = document.querySelector("#weekly-chart");
+const monthlyChartElement = document.querySelector("#monthly-chart");
 const appTimezone = window.SOLAR_MONITOR_CONFIG.timezoneName || "Australia/Melbourne";
 const uiStateKey = "solar-monitor-ui-state";
 
@@ -188,6 +187,27 @@ function getHourKey(dateLike) {
   return `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:00`;
 }
 
+function getWeekKey(dateLike) {
+  const parts = getZonedParts(dateLike);
+  const date = new Date(
+    Number(parts.year),
+    Number(parts.month) - 1,
+    Number(parts.day),
+    0,
+    0,
+    0,
+    0
+  );
+  const weekday = (date.getDay() + 6) % 7;
+  date.setDate(date.getDate() - weekday);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+function getMonthKey(dateLike) {
+  const parts = getZonedParts(dateLike);
+  return `${parts.year}-${parts.month}`;
+}
+
 function formatDateTime(dateLike) {
   if (!dateLike) {
     return "never";
@@ -338,7 +358,7 @@ function getChartHeight() {
 }
 
 function resizeCharts() {
-  [bleChartElement, solarChartElement, netChartElement, cumulativeChartElement, hourlyChartElement, dailyChartElement].forEach((element) => {
+  [bleChartElement, cumulativeChartElement, hourlyChartElement, weeklyChartElement, monthlyChartElement].forEach((element) => {
     if (element) {
       Plotly.Plots.resize(element);
     }
@@ -819,7 +839,7 @@ function buildRateChart(element, chartKey, title, items, valueKey, colors, histo
   captureChartState(element, chartKey);
 }
 
-function renderFirstRowCharts(items, historyItems) {
+function renderBleSolarChart(items, historyItems) {
   const dark = getTheme() === "dark";
   const bleGrid = items
     .filter((item) => item.source === "ble" && item.grid_usage_watts !== null)
@@ -833,27 +853,126 @@ function renderFirstRowCharts(items, historyItems) {
   const siteSolarHistory = historyItems
     .filter((item) => item.source === "local_site" && item.solar_generation_watts !== null)
     .sort((left, right) => new Date(left.observed_at) - new Date(right.observed_at));
-  const netItems = buildNetItems(items).map((item) => ({
-    observed_at: item.observed_at,
-    net_rate: item.net_power_watts
-  }));
-  const netHistoryItems = buildNetItems(historyItems).map((item) => ({
-    observed_at: item.observed_at,
-    net_rate: item.net_power_watts
-  }));
 
-  buildRateChart(bleChartElement, "ble-rate", "BLE grid", bleGrid, "grid_usage_watts", {
-    line: dark ? "#7fb0ff" : "#6f96d8",
-    fill: dark ? "rgba(127, 176, 255, 0.16)" : "rgba(111, 150, 216, 0.17)"
-  }, bleGridHistory);
-  buildRateChart(solarChartElement, "solar-rate", "Site solar", siteSolar, "solar_generation_watts", {
-    line: dark ? "#8ee29d" : "#7cc98a",
-    fill: dark ? "rgba(142, 226, 157, 0.15)" : "rgba(124, 201, 138, 0.14)"
-  }, siteSolarHistory);
-  buildRateChart(netChartElement, "net-rate", "Combined total", netItems, "net_rate", {
-    line: dark ? "#f08de0" : "#da78c6",
-    fill: dark ? "rgba(240, 141, 224, 0.16)" : "rgba(218, 120, 198, 0.16)"
-  }, netHistoryItems);
+  const chartTheme = buildChartTheme();
+  const nowX = bleGrid.length || siteSolar.length ? toChartTime(new Date()) : null;
+  const traces = [
+    {
+      x: bleGrid.map((item) => toChartTime(item.observed_at)),
+      y: bleGrid.map((item) => ratePerMinuteToKwPerHour(item.grid_usage_watts)),
+      customdata: bleGrid.map((item) => Number(item.grid_usage_watts)),
+      mode: "lines",
+      name: "BLE grid",
+      line: { color: dark ? "#7fb0ff" : "#6f96d8", width: 1.6, shape: "linear" },
+      fill: "tozeroy",
+      fillcolor: dark ? "rgba(127, 176, 255, 0.16)" : "rgba(111, 150, 216, 0.17)",
+      hovertemplate: buildRateHoverTemplate("BLE grid")
+    },
+    {
+      x: bleGrid.map((item) => toChartTime(item.observed_at)),
+      y: bleGrid.map((item) => Number(item.grid_usage_watts)),
+      yaxis: "y2",
+      mode: "lines",
+      name: "BLE grid raw",
+      showlegend: false,
+      hoverinfo: "skip",
+      line: { color: "rgba(0,0,0,0)", width: 0 }
+    },
+    {
+      x: buildProjectionSeries(bleGrid, "grid_usage_watts").map((item) => toChartTime(item.observed_at)),
+      y: buildProjectionSeries(bleGrid, "grid_usage_watts").map((item) => ratePerMinuteToKwPerHour(item.value)),
+      customdata: buildProjectionSeries(bleGrid, "grid_usage_watts").map((item) => Number(item.value)),
+      mode: "lines",
+      name: "BLE grid trend",
+      line: { color: dark ? "#7fb0ff" : "#6f96d8", width: 1.5, dash: "dot" },
+      hovertemplate: buildRateHoverTemplate("BLE grid trend")
+    },
+    {
+      x: buildWeeklyMeanSeries(bleGridHistory, "grid_usage_watts").filter((item) => item.value !== null).map((item) => toChartTime(item.observed_at)),
+      y: buildWeeklyMeanSeries(bleGridHistory, "grid_usage_watts").filter((item) => item.value !== null).map((item) => ratePerMinuteToKwPerHour(item.value)),
+      customdata: buildWeeklyMeanSeries(bleGridHistory, "grid_usage_watts").filter((item) => item.value !== null).map((item) => Number(item.value)),
+      mode: "lines",
+      name: "BLE grid weekly mean",
+      line: { color: dark ? "#7fb0ff" : "#6f96d8", width: 1.2, dash: "dash" },
+      opacity: 0.35,
+      hovertemplate: buildRateHoverTemplate("BLE grid weekly mean")
+    },
+    {
+      x: siteSolar.map((item) => toChartTime(item.observed_at)),
+      y: siteSolar.map((item) => ratePerMinuteToKwPerHour(item.solar_generation_watts)),
+      customdata: siteSolar.map((item) => Number(item.solar_generation_watts)),
+      mode: "lines",
+      name: "Site solar",
+      line: { color: dark ? "#8ee29d" : "#7cc98a", width: 1.6, shape: "linear" },
+      fill: "tozeroy",
+      fillcolor: dark ? "rgba(142, 226, 157, 0.12)" : "rgba(124, 201, 138, 0.12)",
+      hovertemplate: buildRateHoverTemplate("Site solar")
+    },
+    {
+      x: siteSolar.map((item) => toChartTime(item.observed_at)),
+      y: siteSolar.map((item) => Number(item.solar_generation_watts)),
+      yaxis: "y2",
+      mode: "lines",
+      name: "Site solar raw",
+      showlegend: false,
+      hoverinfo: "skip",
+      line: { color: "rgba(0,0,0,0)", width: 0 }
+    },
+    {
+      x: buildProjectionSeries(siteSolar, "solar_generation_watts").map((item) => toChartTime(item.observed_at)),
+      y: buildProjectionSeries(siteSolar, "solar_generation_watts").map((item) => ratePerMinuteToKwPerHour(item.value)),
+      customdata: buildProjectionSeries(siteSolar, "solar_generation_watts").map((item) => Number(item.value)),
+      mode: "lines",
+      name: "Site solar trend",
+      line: { color: dark ? "#8ee29d" : "#7cc98a", width: 1.5, dash: "dot" },
+      hovertemplate: buildRateHoverTemplate("Site solar trend")
+    },
+    {
+      x: buildWeeklyMeanSeries(siteSolarHistory, "solar_generation_watts").filter((item) => item.value !== null).map((item) => toChartTime(item.observed_at)),
+      y: buildWeeklyMeanSeries(siteSolarHistory, "solar_generation_watts").filter((item) => item.value !== null).map((item) => ratePerMinuteToKwPerHour(item.value)),
+      customdata: buildWeeklyMeanSeries(siteSolarHistory, "solar_generation_watts").filter((item) => item.value !== null).map((item) => Number(item.value)),
+      mode: "lines",
+      name: "Site solar weekly mean",
+      line: { color: dark ? "#8ee29d" : "#7cc98a", width: 1.2, dash: "dash" },
+      opacity: 0.35,
+      hovertemplate: buildRateHoverTemplate("Site solar weekly mean")
+    }
+  ];
+
+  const layout = {
+    ...chartTheme,
+    height: getChartHeight(),
+    shapes: nowX ? [buildNowLine(nowX)] : [],
+    uirevision: "ble-solar-rate",
+    title: {
+      text: "BLE grid and site solar",
+      font: { color: dark ? "#edf4ff" : "#263445", size: 16 }
+    },
+    yaxis: {
+      ...chartTheme.yaxis,
+      title: getAxisTitleRate(),
+      zeroline: true,
+      zerolinecolor: dark ? "rgba(124, 147, 180, 0.42)" : "rgba(164, 179, 201, 0.42)",
+      rangemode: "tozero"
+    },
+    yaxis2: {
+      title: getAxisTitleSubRate(),
+      overlaying: "y",
+      side: "right",
+      tickfont: { color: dark ? "#97abc5" : "#7a8797", size: 11 },
+      titlefont: { color: dark ? "#97abc5" : "#7a8797" },
+      gridcolor: "rgba(0,0,0,0)",
+      zeroline: false
+    }
+  };
+
+  const chartState = applyStoredChartState(layout, "ble-solar-rate", traces);
+  Plotly.react(bleChartElement, chartState.traces, chartState.layout, {
+    responsive: true,
+    displaylogo: false,
+    modeBarButtonsToRemove: ["lasso2d", "select2d"]
+  });
+  captureChartState(bleChartElement, "ble-solar-rate");
 }
 
 function renderCumulativeChart(items) {
@@ -944,7 +1063,7 @@ function renderEnergyBars(element, chartKey, title, bars) {
   const layout = {
     ...chartTheme,
     height: getChartHeight(),
-    barmode: "stack",
+    barmode: "group",
     uirevision: chartKey,
     title: {
       text: title,
@@ -976,8 +1095,10 @@ function renderEnergyBreakdowns(items) {
 
   const solarHourBars = aggregateEnergyByBucket(buildEnergySegments(solarItems, "solar_generation_watts"), getHourKey);
   const gridHourBars = aggregateEnergyByBucket(buildEnergySegments(bleGridItems, "grid_usage_watts"), getHourKey);
-  const solarDayBars = aggregateEnergyByBucket(buildEnergySegments(solarItems, "solar_generation_watts"), getDayKey);
-  const gridDayBars = aggregateEnergyByBucket(buildEnergySegments(bleGridItems, "grid_usage_watts"), getDayKey);
+  const solarWeekBars = aggregateEnergyByBucket(buildEnergySegments(solarItems, "solar_generation_watts"), getWeekKey);
+  const gridWeekBars = aggregateEnergyByBucket(buildEnergySegments(bleGridItems, "grid_usage_watts"), getWeekKey);
+  const solarMonthBars = aggregateEnergyByBucket(buildEnergySegments(solarItems, "solar_generation_watts"), getMonthKey);
+  const gridMonthBars = aggregateEnergyByBucket(buildEnergySegments(bleGridItems, "grid_usage_watts"), getMonthKey);
 
   function combineBars(solarBars, gridBars) {
     const map = new Map();
@@ -993,7 +1114,8 @@ function renderEnergyBreakdowns(items) {
   }
 
   renderEnergyBars(hourlyChartElement, "hourly-bars", "Hourly cumulative split", combineBars(solarHourBars, gridHourBars));
-  renderEnergyBars(dailyChartElement, "daily-bars", "Daily cumulative split", combineBars(solarDayBars, gridDayBars));
+  renderEnergyBars(weeklyChartElement, "weekly-bars", "Weekly cumulative split", combineBars(solarWeekBars, gridWeekBars));
+  renderEnergyBars(monthlyChartElement, "monthly-bars", "Monthly cumulative split", combineBars(solarMonthBars, gridMonthBars));
 }
 
 function renderEmptyCharts() {
@@ -1050,12 +1172,11 @@ function renderEmptyCharts() {
     captureChartState(element, chartKey);
   }
 
-  emptyRateChart(bleChartElement, "ble-rate", "BLE grid");
-  emptyRateChart(solarChartElement, "solar-rate", "Site solar");
-  emptyRateChart(netChartElement, "net-rate", "Combined total");
+  emptyRateChart(bleChartElement, "ble-solar-rate", "BLE grid and site solar");
   emptyEnergyChart(cumulativeChartElement, "cumulative", "Cumulative energy");
   emptyEnergyChart(hourlyChartElement, "hourly-bars", "Hourly cumulative split");
-  emptyEnergyChart(dailyChartElement, "daily-bars", "Daily cumulative split");
+  emptyEnergyChart(weeklyChartElement, "weekly-bars", "Weekly cumulative split");
+  emptyEnergyChart(monthlyChartElement, "monthly-bars", "Monthly cumulative split");
 }
 
 async function refresh() {
@@ -1106,7 +1227,7 @@ async function refresh() {
     }
 
     renderCumulativeStats(items, statusPayload.pollers);
-    renderFirstRowCharts(items, historyItems);
+    renderBleSolarChart(items, historyItems);
     renderCumulativeChart(items);
     renderEnergyBreakdowns(items);
     refreshText.textContent = `Updated ${new Date().toLocaleTimeString("en-AU", { timeZone: appTimezone })}`;
