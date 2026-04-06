@@ -54,8 +54,7 @@ body {
 }
 
 .topbar,
-.grid,
-.charts-grid {
+.grid {
   display: grid;
   gap: 20px;
 }
@@ -147,14 +146,6 @@ input[type="range"] {
   padding: 22px;
 }
 
-.charts-grid {
-  margin-bottom: 20px;
-}
-
-.charts-grid-three {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-}
-
 .panel-header {
   display: flex;
   justify-content: space-between;
@@ -182,7 +173,6 @@ input[type="range"] {
 
 .stats-grid {
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  margin-bottom: 18px;
 }
 
 .status-card,
@@ -194,27 +184,6 @@ input[type="range"] {
   background: var(--panel-strong);
   border: 1px solid var(--line);
   border-radius: 18px;
-}
-
-.metric-reading {
-  display: grid;
-  gap: 4px;
-}
-
-.metric-reading span {
-  color: var(--muted);
-  font-size: 0.82rem;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-}
-
-.metric-reading strong {
-  font-size: 1.2rem;
-  line-height: 1.2;
-}
-
-.metric-reading small {
-  font-size: 0.88rem;
 }
 
 .status-card strong,
@@ -289,47 +258,14 @@ input[type="range"] {
   margin-bottom: 20px;
 }
 
-.totals-table-wrap {
-  overflow-x: auto;
-}
-
-.totals-table {
-  width: 100%;
-  border-collapse: collapse;
-  background: var(--panel-strong);
-  border: 1px solid var(--line);
-  border-radius: 18px;
-  overflow: hidden;
-}
-
-.totals-table th,
-.totals-table td {
-  padding: 14px 16px;
-  text-align: left;
-  border-bottom: 1px solid var(--line);
-}
-
-.totals-table th {
-  color: var(--muted);
-  font-size: 0.9rem;
-  font-weight: 700;
-}
-
-.totals-table tr:last-child td {
-  border-bottom: 0;
-}
-
 .chart-panel {
   padding-bottom: 6px;
   margin-bottom: 20px;
 }
 
-#ble-chart,
-#solar-chart,
+#chart,
 #net-chart,
-#cumulative-chart,
-#hourly-chart,
-#daily-chart {
+#cumulative-chart {
   width: 100%;
   height: 420px;
   border-radius: 18px;
@@ -337,8 +273,7 @@ input[type="range"] {
 }
 
 @media (max-width: 900px) {
-  .grid,
-  .charts-grid-three {
+  .grid {
     grid-template-columns: 1fr;
   }
 
