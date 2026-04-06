@@ -45,34 +45,68 @@
       <span id="last-refresh" class="last-refresh">Loading...</span>
     </section>
 
-    <section class="panel chart-panel">
-      <div class="panel-header">
-        <div>
-          <h2>Power vs time</h2>
-          <span>Rate traces in W/min with matching kW/hr scale on the right axis.</span>
+    <section class="charts-grid charts-grid-three">
+      <section class="panel chart-panel">
+        <div class="panel-header">
+          <div>
+            <h2>BLE grid</h2>
+            <span>BLE grid rate with kW/hr primary axis.</span>
+          </div>
         </div>
-      </div>
-      <div id="chart"></div>
+        <div id="ble-chart"></div>
+      </section>
+
+      <section class="panel chart-panel">
+        <div class="panel-header">
+          <div>
+            <h2>Site solar</h2>
+            <span>Local site solar rate with kW/hr primary axis.</span>
+          </div>
+        </div>
+        <div id="solar-chart"></div>
+      </section>
+
+      <section class="panel chart-panel">
+        <div class="panel-header">
+          <div>
+            <h2>Net balance</h2>
+            <span>Site solar minus BLE grid.</span>
+          </div>
+        </div>
+        <div id="net-chart"></div>
+      </section>
     </section>
 
-    <section class="panel chart-panel">
-      <div class="panel-header">
-        <div>
-          <h2>Net solar minus grid</h2>
-          <span>Net rate in W/min with matching kW/hr scale on the right axis.</span>
+    <section class="charts-grid charts-grid-three">
+      <section class="panel chart-panel">
+        <div class="panel-header">
+          <div>
+            <h2>Cumulative energy</h2>
+            <span>BLE grid and site solar daily cumulative totals.</span>
+          </div>
         </div>
-      </div>
-      <div id="net-chart"></div>
-    </section>
+        <div id="cumulative-chart"></div>
+      </section>
 
-    <section class="panel chart-panel">
-      <div class="panel-header">
-        <div>
-          <h2>Cumulative energy</h2>
-          <span>Daily cumulative kWh reset at Melbourne midnight.</span>
+      <section class="panel chart-panel">
+        <div class="panel-header">
+          <div>
+            <h2>Hourly cumulative split</h2>
+            <span>Hourly stacked energy split between BLE grid and site solar.</span>
+          </div>
         </div>
-      </div>
-      <div id="cumulative-chart"></div>
+        <div id="hourly-chart"></div>
+      </section>
+
+      <section class="panel chart-panel">
+        <div class="panel-header">
+          <div>
+            <h2>Daily cumulative split</h2>
+            <span>Daily stacked energy split between BLE grid and site solar.</span>
+          </div>
+        </div>
+        <div id="daily-chart"></div>
+      </section>
     </section>
 
     <section class="grid">
@@ -113,6 +147,19 @@
         <span>Day totals that reset at Melbourne midnight.</span>
       </div>
       <div id="cumulative-stats" class="stats-grid"></div>
+      <div class="totals-table-wrap">
+        <table class="totals-table">
+          <thead>
+            <tr>
+              <th>Period</th>
+              <th>Solar</th>
+              <th>Grid</th>
+              <th>Net</th>
+            </tr>
+          </thead>
+          <tbody id="totals-table-body"></tbody>
+        </table>
+      </div>
     </section>
   </main>
 
