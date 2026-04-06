@@ -219,7 +219,7 @@ function getAreaFillColor(color) {
 function formatStatusCard(item) {
   const details = Object.entries(item.details || {})
     .map(([key, value]) => {
-      const displayValue = key.endsWith("_at") && value ? formatDateTime(value) : (value ?? "n/a");
+      const displayValue = key.endsWith("_at") && value ? formatDateTime(value) : (value === null || value === undefined ? "n/a" : value);
       return `<small><strong>${key}</strong>: ${displayValue}</small>`;
     })
     .join("");
@@ -708,7 +708,13 @@ function renderRateChart(chartKey, canvas, title, series, valueKey, color, histo
       }
     }
   ], (point, unit) => {
-    const value = Number(point.projected_value ?? point.average_value ?? point[valueKey]);
+    const value = Number(
+      point.projected_value !== undefined && point.projected_value !== null
+        ? point.projected_value
+        : (point.average_value !== undefined && point.average_value !== null
+          ? point.average_value
+          : point[valueKey])
+    );
     return unit === "kwhr" ? ratePerMinuteToKwPerHour(value) : value;
   });
 
@@ -783,7 +789,13 @@ function renderNetChart(items, historyItems = []) {
       }
     }
   ], (point, unit) => {
-    const value = Number(point.projected_value ?? point.average_value ?? point.net_power_watts);
+    const value = Number(
+      point.projected_value !== undefined && point.projected_value !== null
+        ? point.projected_value
+        : (point.average_value !== undefined && point.average_value !== null
+          ? point.average_value
+          : point.net_power_watts)
+    );
     return unit === "kwhr" ? ratePerMinuteToKwPerHour(value) : value;
   });
 
