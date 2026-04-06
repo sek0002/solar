@@ -39,7 +39,7 @@ Examples:
 ## Run locally
 
 ```bash
-python3 -m venv .venv
+python3 -m venv --system-site-packages .venv
 source .venv/bin/activate
 python3 -m pip install -r requirements.txt
 python3 -m uvicorn app.main:app --reload
@@ -71,7 +71,7 @@ If you want port 80 instead of port 8000, either put nginx in front of the app o
 sudo setcap 'cap_net_bind_service=+ep' /opt/solar-monitor/.venv/bin/python3
 ```
 
-`poll_solar.sh` creates the venv if needed, installs the repo requirements, and then mirrors the currently installed global `python3` `bleak` version into the venv so the service uses the same BLE library version as successful manual tests.
+`poll_solar.sh` creates the venv with `--system-site-packages`, so the service can import globally installed `python3` packages like `bleak` while still keeping the app's own dependencies in `.venv`.
 
 Enable and start the service:
 
