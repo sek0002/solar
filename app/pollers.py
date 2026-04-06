@@ -304,6 +304,7 @@ class LocalSitePoller:
         self.database = database
         self.statuses = statuses
         self._stopped = asyncio.Event()
+        self._site_404_started_at: Optional[datetime] = None
 
     async def run(self) -> None:
         await self.statuses.update(
@@ -316,20 +317,28 @@ class LocalSitePoller:
                 try:
                     response = await client.get(self.settings.local_site_url)
                     if response.status_code == 404:
+                        if self._site_404_started_at is None:
+                            self._site_404_started_at = datetime.now(timezone.utc)
                         await self._record_error_fallback(
                             "HTTP 404 from {url}".format(url=self.settings.local_site_url),
                             average_window=self.settings.local_site_404_average_window,
+                            zero_after_streak=self._site_404_started_at,
                         )
                         await self.statuses.update(
                             "local_site",
                             state="error",
                             error=f"HTTP 404 from {self.settings.local_site_url}",
-                            details={"url": self.settings.local_site_url, "status_code": 404},
+                            details={
+                                "url": self.settings.local_site_url,
+                                "status_code": 404,
+                                "404_streak_started_at": self._site_404_started_at.isoformat(),
+                            },
                         )
                         await asyncio.sleep(self.settings.local_site_poll_seconds)
                         continue
 
                     response.raise_for_status()
+                    self._site_404_started_at = None
                     payload = self._parse_response(response)
                     if (
                         payload.get("grid_usage_watts") is None
@@ -380,11 +389,22 @@ class LocalSitePoller:
     async def stop(self) -> None:
         self._stopped.set()
 
-    async def _record_error_fallback(self, error_message: str, average_window: Optional[int] = None) -> None:
+    async def _record_error_fallback(
+        self,
+        error_message: str,
+        average_window: Optional[int] = None,
+        zero_after_streak: Optional[datetime] = None,
+    ) -> None:
         if not self.settings.local_site_zero_on_error:
             return
 
         window = average_window or self.settings.failure_average_window
+        observed_at = datetime.now(timezone.utc)
+        use_zero_fallback = False
+        if zero_after_streak is not None:
+            streak_minutes = (observed_at - zero_after_streak).total_seconds() / 60.0
+            use_zero_fallback = streak_minutes >= self.settings.local_site_404_zero_after_minutes
+
         average_grid = self.database.get_recent_average(
             source="local_site",
             column="grid_usage_watts",
@@ -396,15 +416,16 @@ class LocalSitePoller:
             count=window,
         )
 
-        observed_at = datetime.now(timezone.utc)
         payload = {
             "content_type": None,
-            "grid_usage_watts": average_grid if average_grid is not None else 0.0,
-            "solar_generation_watts": average_solar if average_solar is not None else 0.0,
+            "grid_usage_watts": 0.0 if use_zero_fallback else (average_grid if average_grid is not None else 0.0),
+            "solar_generation_watts": 0.0 if use_zero_fallback else (average_solar if average_solar is not None else 0.0),
             "url": self.settings.local_site_url,
             "fallback_reason": error_message,
             "imputed": True,
             "average_window": window,
+            "zero_after_404_minutes": self.settings.local_site_404_zero_after_minutes,
+            "used_zero_fallback": use_zero_fallback,
         }
         self.database.insert_sample(
             source="local_site",

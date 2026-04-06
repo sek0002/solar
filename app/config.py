@@ -64,6 +64,7 @@ class Settings:
     local_solar_multiplier: float = _env_float("LOCAL_SOLAR_MULTIPLIER", 1.0)
     local_site_zero_on_error: bool = _env_bool("LOCAL_SITE_ZERO_ON_ERROR", True)
     local_site_404_average_window: int = _env_int("LOCAL_SITE_404_AVERAGE_WINDOW", 5)
+    local_site_404_zero_after_minutes: float = _env_float("LOCAL_SITE_404_ZERO_AFTER_MINUTES", 10.0)
     failure_average_window: int = _env_int("FAILURE_AVERAGE_WINDOW", 3)
 
     api_default_hours: int = _env_int("API_DEFAULT_HOURS", 24)
