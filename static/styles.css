@@ -68,6 +68,8 @@ body {
 
 h2,
 p,
+h3,
+p,
 label {
   margin: 0;
 }
@@ -268,6 +270,37 @@ input[type="range"] {
   padding-bottom: 6px;
 }
 
+.grouped-chart-panel {
+  margin-bottom: 20px;
+}
+
+.charts-grid-nested {
+  gap: 16px;
+}
+
+.chart-panel-subsection {
+  min-width: 0;
+  padding: 14px;
+  background: var(--panel-strong);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+}
+
+.subchart-header {
+  display: grid;
+  gap: 4px;
+  margin-bottom: 12px;
+}
+
+.subchart-header h3 {
+  font-size: 1rem;
+}
+
+.subchart-header span {
+  color: var(--muted);
+  font-size: 0.84rem;
+}
+
 #ble-chart,
 #solar-chart,
 #net-chart,
@@ -339,6 +372,10 @@ input[type="range"] {
 
   .charts-grid-three {
     grid-template-columns: 1fr;
+  }
+
+  .chart-panel-subsection {
+    padding: 12px;
   }
 
   .topbar {

@@ -45,36 +45,38 @@
       <span id="last-refresh" class="last-refresh">Loading...</span>
     </section>
 
-    <section class="charts-grid charts-grid-three">
-      <section class="panel chart-panel">
-        <div class="panel-header">
-          <div>
-            <h2>BLE grid</h2>
+    <section class="panel grouped-chart-panel">
+      <div class="panel-header">
+        <div>
+          <h2>Live line charts</h2>
+          <span>BLE grid, site solar, and combined total grouped in one card.</span>
+        </div>
+      </div>
+      <div class="charts-grid charts-grid-three charts-grid-nested">
+        <section class="chart-panel-subsection">
+          <div class="subchart-header">
+            <h3>BLE grid</h3>
             <span>BLE grid rate with kW/hr primary axis.</span>
           </div>
-        </div>
-        <div id="ble-chart"></div>
-      </section>
+          <div id="ble-chart"></div>
+        </section>
 
-      <section class="panel chart-panel">
-        <div class="panel-header">
-          <div>
-            <h2>Site solar</h2>
+        <section class="chart-panel-subsection">
+          <div class="subchart-header">
+            <h3>Site solar</h3>
             <span>Local site solar rate with kW/hr primary axis.</span>
           </div>
-        </div>
-        <div id="solar-chart"></div>
-      </section>
+          <div id="solar-chart"></div>
+        </section>
 
-      <section class="panel chart-panel">
-        <div class="panel-header">
-          <div>
-            <h2>Combined total</h2>
+        <section class="chart-panel-subsection">
+          <div class="subchart-header">
+            <h3>Combined total</h3>
             <span>BLE grid plus site solar.</span>
           </div>
-        </div>
-        <div id="net-chart"></div>
-      </section>
+          <div id="net-chart"></div>
+        </section>
+      </div>
     </section>
 
     <section class="charts-grid charts-grid-three">
