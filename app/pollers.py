@@ -695,21 +695,60 @@ class TuyaEvPoller:
             except (TypeError, ValueError):
                 return None
 
-        voltage_v = read_number(self.settings.tuya_voltage_code, self.settings.tuya_voltage_divisor)
-        current_a = read_number(self.settings.tuya_current_code, self.settings.tuya_current_divisor)
-        power_kw = read_number(self.settings.tuya_power_code, self.settings.tuya_power_divisor)
-        temperature_c = read_number(self.settings.tuya_temperature_code, self.settings.tuya_temperature_divisor)
-        session_energy_kwh = read_number(self.settings.tuya_session_energy_code, self.settings.tuya_session_energy_divisor)
+        def first_number(candidates: list[tuple[str, float]]) -> tuple[Optional[float], Optional[str]]:
+            for code, divisor in candidates:
+                value = read_number(code, divisor)
+                if value is not None:
+                    return value, code
+            return None, None
+
+        voltage_v, voltage_code = first_number([
+            (self.settings.tuya_voltage_code, self.settings.tuya_voltage_divisor),
+            ("volt", 10.0),
+            ("cur_voltage", 10.0),
+        ])
+        current_a, current_code = first_number([
+            (self.settings.tuya_current_code, self.settings.tuya_current_divisor),
+            ("cur_current", 1000.0),
+            ("current", 1000.0),
+        ])
+        power_kw, power_code = first_number([
+            (self.settings.tuya_power_code, self.settings.tuya_power_divisor),
+            ("cur_power", 1000.0),
+            ("power", 1000.0),
+            ("power_kw", 1.0),
+        ])
+        temperature_c, temperature_code = first_number([
+            (self.settings.tuya_temperature_code, self.settings.tuya_temperature_divisor),
+            ("temp_current", 10.0),
+            ("temperature", 10.0),
+        ])
+        session_energy_kwh, session_energy_code = first_number([
+            (self.settings.tuya_session_energy_code, self.settings.tuya_session_energy_divisor),
+            ("add_ele", 100.0),
+            ("charge_energy", 100.0),
+        ])
 
         if power_kw is None:
-            raise RuntimeError("Tuya EV power code {code} missing from status payload".format(code=self.settings.tuya_power_code))
+            available_codes = ", ".join(sorted(by_code.keys()))
+            raise RuntimeError(
+                "Tuya EV power code missing from status payload. Tried {codes}. Available codes: {available}".format(
+                    codes=", ".join([self.settings.tuya_power_code, "cur_power", "power", "power_kw"]),
+                    available=available_codes or "none",
+                )
+            )
 
         return {
             "voltage_v": voltage_v,
+            "voltage_code_used": voltage_code,
             "current_a": current_a,
+            "current_code_used": current_code,
             "power_kw": power_kw,
+            "power_code_used": power_code,
             "temperature_c": temperature_c,
+            "temperature_code_used": temperature_code,
             "session_energy_kwh": session_energy_kwh,
+            "session_energy_code_used": session_energy_code,
             "ev_charging_rate_w_per_min": (power_kw * 1000.0) / 60.0,
             "status_codes": statuses,
         }
