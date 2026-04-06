@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import hmac
 import json
 import logging
 import re
@@ -8,6 +10,7 @@ import struct
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Optional
+import uuid
 
 import httpx
 import pytz
@@ -539,6 +542,179 @@ class LocalSitePoller:
         return None
 
 
+class TuyaCloudClient:
+    def __init__(self, settings: Settings) -> None:
+        self.settings = settings
+        self._access_token: Optional[str] = None
+        self._token_expires_at = 0.0
+
+    def _build_headers(self, method: str, path: str, access_token: str = "") -> dict[str, str]:
+        timestamp = str(int(datetime.now(timezone.utc).timestamp() * 1000))
+        nonce = uuid.uuid4().hex
+        content_sha256 = hashlib.sha256(b"").hexdigest()
+        string_to_sign = "{method}\n{content_sha}\n\n{path}".format(
+            method=method.upper(),
+            content_sha=content_sha256,
+            path=path,
+        )
+        sign_input = "{client_id}{token}{timestamp}{nonce}{string_to_sign}".format(
+            client_id=self.settings.tuya_access_id,
+            token=access_token,
+            timestamp=timestamp,
+            nonce=nonce,
+            string_to_sign=string_to_sign,
+        )
+        signature = hmac.new(
+            self.settings.tuya_access_secret.encode(),
+            sign_input.encode(),
+            hashlib.sha256,
+        ).hexdigest().upper()
+        headers = {
+            "client_id": self.settings.tuya_access_id,
+            "sign": signature,
+            "sign_method": "HMAC-SHA256",
+            "t": timestamp,
+            "nonce": nonce,
+        }
+        if access_token:
+            headers["access_token"] = access_token
+        return headers
+
+    async def get_access_token(self, client: httpx.AsyncClient) -> str:
+        now = datetime.now(timezone.utc).timestamp()
+        if self._access_token and now < self._token_expires_at - 60:
+            return self._access_token
+
+        path = "/v1.0/token?grant_type=1"
+        response = await client.get(
+            "{base}{path}".format(base=self.settings.tuya_base_url, path=path),
+            headers=self._build_headers("GET", path),
+        )
+        response.raise_for_status()
+        payload = response.json()
+        if not payload.get("success"):
+            raise RuntimeError("Tuya token request failed: {code} {msg}".format(
+                code=payload.get("code"),
+                msg=payload.get("msg"),
+            ))
+
+        result = payload.get("result") or {}
+        self._access_token = result.get("access_token")
+        expire_seconds = int(result.get("expire_time", 3600))
+        self._token_expires_at = now + expire_seconds
+        if not self._access_token:
+            raise RuntimeError("Tuya token response missing access token")
+        return self._access_token
+
+    async def get_device_status(self, client: httpx.AsyncClient) -> list[dict[str, Any]]:
+        token = await self.get_access_token(client)
+        path = "/v1.0/devices/{device_id}/status".format(device_id=self.settings.tuya_device_id)
+        response = await client.get(
+            "{base}{path}".format(base=self.settings.tuya_base_url, path=path),
+            headers=self._build_headers("GET", path, token),
+        )
+        response.raise_for_status()
+        payload = response.json()
+        if not payload.get("success"):
+            raise RuntimeError("Tuya status request failed: {code} {msg}".format(
+                code=payload.get("code"),
+                msg=payload.get("msg"),
+            ))
+        result = payload.get("result") or []
+        if not isinstance(result, list):
+            raise RuntimeError("Unexpected Tuya status payload shape")
+        return result
+
+
+class TuyaEvPoller:
+    def __init__(self, settings: Settings, database: Database, statuses: StatusRegistry) -> None:
+        self.settings = settings
+        self.database = database
+        self.statuses = statuses
+        self._stopped = asyncio.Event()
+        self._client = TuyaCloudClient(settings)
+
+    async def run(self) -> None:
+        await self.statuses.update(
+            "tuya_ev",
+            state="starting",
+            details={"device_id": self.settings.tuya_device_id or "missing"},
+        )
+        async with httpx.AsyncClient(timeout=self.settings.tuya_timeout_seconds) as client:
+            while not self._stopped.is_set():
+                try:
+                    if not self.settings.tuya_access_id or not self.settings.tuya_access_secret or not self.settings.tuya_device_id:
+                        raise RuntimeError("Tuya EV poller requires TUYA_ACCESS_ID, TUYA_ACCESS_SECRET, and TUYA_DEVICE_ID")
+
+                    statuses = await self._client.get_device_status(client)
+                    sample = self._parse_statuses(statuses)
+                    observed_at = datetime.now(timezone.utc)
+                    self.database.insert_sample(
+                        source="tuya_ev",
+                        observed_at=observed_at,
+                        grid_usage_watts=sample["ev_charging_rate_w_per_min"],
+                        solar_generation_watts=None,
+                        raw_payload=sample,
+                    )
+                    await self.statuses.update(
+                        "tuya_ev",
+                        state="connected",
+                        mark_success=True,
+                        details={
+                            "device_id": self.settings.tuya_device_id,
+                            "voltage_v": sample.get("voltage_v"),
+                            "current_a": sample.get("current_a"),
+                            "power_kw": sample.get("power_kw"),
+                            "temperature_c": sample.get("temperature_c"),
+                            "session_energy_kwh": sample.get("session_energy_kwh"),
+                            "latest_observed_at": observed_at.isoformat(),
+                        },
+                    )
+                except Exception as exc:
+                    LOGGER.warning("Tuya EV error: %s", exc)
+                    await self.statuses.update(
+                        "tuya_ev",
+                        state="error",
+                        error=str(exc),
+                        details={"device_id": self.settings.tuya_device_id or "missing"},
+                    )
+                await asyncio.sleep(self.settings.tuya_poll_seconds)
+
+    async def stop(self) -> None:
+        self._stopped.set()
+
+    def _parse_statuses(self, statuses: list[dict[str, Any]]) -> dict[str, Any]:
+        by_code = {str(item.get("code")): item.get("value") for item in statuses if isinstance(item, dict)}
+
+        def read_number(code: str, divisor: float) -> Optional[float]:
+            value = by_code.get(code)
+            if value is None:
+                return None
+            try:
+                return float(value) / divisor
+            except (TypeError, ValueError):
+                return None
+
+        voltage_v = read_number(self.settings.tuya_voltage_code, self.settings.tuya_voltage_divisor)
+        current_a = read_number(self.settings.tuya_current_code, self.settings.tuya_current_divisor)
+        power_kw = read_number(self.settings.tuya_power_code, self.settings.tuya_power_divisor)
+        temperature_c = read_number(self.settings.tuya_temperature_code, self.settings.tuya_temperature_divisor)
+        session_energy_kwh = read_number(self.settings.tuya_session_energy_code, self.settings.tuya_session_energy_divisor)
+
+        if power_kw is None:
+            raise RuntimeError("Tuya EV power code {code} missing from status payload".format(code=self.settings.tuya_power_code))
+
+        return {
+            "voltage_v": voltage_v,
+            "current_a": current_a,
+            "power_kw": power_kw,
+            "temperature_c": temperature_c,
+            "session_energy_kwh": session_energy_kwh,
+            "ev_charging_rate_w_per_min": (power_kw * 1000.0) / 60.0,
+            "status_codes": statuses,
+        }
+
+
 class PollingCoordinator:
     def __init__(self, settings: Settings, database: Database) -> None:
         self.settings = settings
@@ -557,6 +733,11 @@ class PollingCoordinator:
             site_poller = LocalSitePoller(self.settings, self.database, self.statuses)
             self.pollers.append(site_poller)
             self.tasks.append(asyncio.create_task(site_poller.run(), name="local-site-poller"))
+
+        if self.settings.tuya_enabled:
+            tuya_poller = TuyaEvPoller(self.settings, self.database, self.statuses)
+            self.pollers.append(tuya_poller)
+            self.tasks.append(asyncio.create_task(tuya_poller.run(), name="tuya-ev-poller"))
 
     async def stop(self) -> None:
         for poller in self.pollers:
