@@ -65,6 +65,19 @@ cp .env.example .env
 nano .env
 ```
 
+To run a Raspberry Pi as a collector-only node that forwards data to another server, set:
+
+```env
+POLLER_ONLY=true
+REMOTE_INGEST_URL=http://your-server:8000
+REMOTE_INGEST_TOKEN=your-shared-token
+BLE_ENABLED=true
+LOCAL_SITE_ENABLED=false
+BYD_ENABLED=false
+```
+
+In that mode, `poll_solar.sh` runs only the pollers and does not start `uvicorn`.
+
 If you want port 80 instead of port 8000, either put nginx in front of the app or grant the venv Python permission to bind low ports:
 
 ```bash

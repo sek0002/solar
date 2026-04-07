@@ -38,6 +38,7 @@ class Settings:
     app_title: str = os.getenv("APP_TITLE", "Solar Monitor")
     database_path: Path = Path(os.getenv("DATABASE_PATH", "data/solar_monitor.db"))
     timezone_name: str = os.getenv("TIMEZONE", "Australia/Melbourne")
+    poller_only: bool = _env_bool("POLLER_ONLY", False)
 
     ble_enabled: bool = _env_bool("BLE_ENABLED", True)
     ble_mac: str = os.getenv("BLE_MAC", "C9:91:09:7A:2C:B9")
@@ -46,6 +47,9 @@ class Settings:
     ble_pulses_per_kwh: float = _env_float("BLE_PULSES_PER_KWH", 1000.0)
     ble_retry_delay_seconds: float = _env_float("BLE_RETRY_DELAY_SECONDS", 5.0)
     ble_connection_timeout_seconds: float = _env_float("BLE_CONNECTION_TIMEOUT_SECONDS", 30.0)
+    remote_ingest_url: str = os.getenv("REMOTE_INGEST_URL", "").rstrip("/")
+    remote_ingest_token: str = os.getenv("REMOTE_INGEST_TOKEN", "")
+    ingest_token: str = os.getenv("INGEST_TOKEN", "")
 
     local_site_enabled: bool = _env_bool("LOCAL_SITE_ENABLED", True)
     local_site_url: str = os.getenv("LOCAL_SITE_URL", "http://127.0.0.1/")

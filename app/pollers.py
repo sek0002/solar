@@ -90,6 +90,7 @@ class PowerpalBlePoller:
         self.statuses = statuses
         self._stopped = asyncio.Event()
         self._melbourne_tz = pytz.timezone(settings.timezone_name)
+        self._remote_client: Optional[httpx.AsyncClient] = None
 
     @staticmethod
     def convert_pairing_code(original_pairing_code: str) -> bytes:
@@ -143,13 +144,15 @@ class PowerpalBlePoller:
         }
 
     async def run(self) -> None:
-        await self.statuses.update("ble", state="starting", details={"mac": self.settings.ble_mac})
+        await self._update_status("ble", state="starting", details={"mac": self.settings.ble_mac})
+        if self.settings.remote_ingest_url:
+            self._remote_client = httpx.AsyncClient(timeout=10.0)
         while not self._stopped.is_set():
             try:
-                await self.statuses.update("ble", state="connecting", details={"mac": self.settings.ble_mac})
+                await self._update_status("ble", state="connecting", details={"mac": self.settings.ble_mac})
                 await self._run_session()
                 if not self._stopped.is_set():
-                    await self.statuses.update(
+                    await self._update_status(
                         "ble",
                         state="disconnected",
                         error="BLE disconnected",
@@ -159,7 +162,7 @@ class PowerpalBlePoller:
             except BleakError as exc:
                 LOGGER.warning("BLE error: %s", exc)
                 await self._record_error_fallback(str(exc))
-                await self.statuses.update(
+                await self._update_status(
                     "ble",
                     state="error",
                     error=str(exc),
@@ -169,7 +172,7 @@ class PowerpalBlePoller:
             except Exception as exc:
                 LOGGER.exception("Unexpected BLE failure")
                 await self._record_error_fallback(str(exc))
-                await self.statuses.update(
+                await self._update_status(
                     "ble",
                     state="error",
                     error=str(exc),
@@ -179,6 +182,8 @@ class PowerpalBlePoller:
 
     async def stop(self) -> None:
         self._stopped.set()
+        if self._remote_client is not None:
+            await self._remote_client.aclose()
 
     async def _run_session(self) -> None:
         batch_size_bytes = int(self.settings.ble_reading_batch_size_minutes).to_bytes(4, byteorder="little")
@@ -225,7 +230,7 @@ class PowerpalBlePoller:
                 LOGGER.debug("Unable to read Powerpal battery level", exc_info=exc)
 
             await client.start_notify(NOTIFY_CHAR, notification_handler)
-            await self.statuses.update(
+            await self._update_status(
                 "ble",
                 state="connected",
                 details={
@@ -277,7 +282,14 @@ class PowerpalBlePoller:
             solar_generation_watts=None,
             raw_payload=sample,
         )
-        await self.statuses.update(
+        await self._forward_sample(
+            source="ble",
+            observed_at=sample["observed_at"],
+            grid_usage_watts=sample["grid_usage_watts"],
+            solar_generation_watts=None,
+            raw_payload=sample,
+        )
+        await self._update_status(
             "ble",
             state="connected",
             mark_success=True,
@@ -299,6 +311,65 @@ class PowerpalBlePoller:
         if not status:
             return None
         return status.details.get(key)
+
+    async def _update_status(
+        self,
+        name: str,
+        *,
+        state: Optional[str] = None,
+        error: Optional[str] = None,
+        details: Optional[dict[str, Any]] = None,
+        mark_success: bool = False,
+    ) -> None:
+        await self.statuses.update(
+            name,
+            state=state,
+            error=error,
+            details=details,
+            mark_success=mark_success,
+        )
+        if self._remote_client is None or not self.settings.remote_ingest_url:
+            return
+        try:
+            await self._remote_client.post(
+                f"{self.settings.remote_ingest_url}/api/ingest/status",
+                headers={"X-Ingest-Token": self.settings.remote_ingest_token} if self.settings.remote_ingest_token else {},
+                json={
+                    "name": name,
+                    "state": state,
+                    "error": error,
+                    "details": details,
+                    "mark_success": mark_success,
+                },
+            )
+        except Exception:
+            LOGGER.debug("Unable to forward BLE status to remote ingest", exc_info=True)
+
+    async def _forward_sample(
+        self,
+        *,
+        source: str,
+        observed_at: datetime,
+        grid_usage_watts: Optional[float],
+        solar_generation_watts: Optional[float],
+        raw_payload: Optional[dict[str, Any]],
+    ) -> None:
+        if self._remote_client is None or not self.settings.remote_ingest_url:
+            return
+        try:
+            await self._remote_client.post(
+                f"{self.settings.remote_ingest_url}/api/ingest/sample",
+                headers={"X-Ingest-Token": self.settings.remote_ingest_token} if self.settings.remote_ingest_token else {},
+                json={
+                    "source": source,
+                    "observed_at": observed_at.isoformat(),
+                    "grid_usage_watts": grid_usage_watts,
+                    "solar_generation_watts": solar_generation_watts,
+                    "raw_payload": raw_payload,
+                },
+            )
+        except Exception:
+            LOGGER.debug("Unable to forward BLE sample to remote ingest", exc_info=True)
 
 
 class LocalSitePoller:

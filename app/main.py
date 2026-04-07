@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI, Query, Request
+from fastapi import FastAPI, Header, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -91,3 +91,47 @@ async def api_status() -> dict[str, object]:
         "pollers": await coordinator.statuses.snapshot(),
         "latest_samples": database.get_latest_samples(),
     }
+
+
+def _check_ingest_token(token: Optional[str]) -> None:
+    configured = settings.ingest_token.strip()
+    if not configured:
+        return
+    if token != configured:
+        raise HTTPException(status_code=401, detail="Invalid ingest token")
+
+
+@app.post("/api/ingest/sample")
+async def api_ingest_sample(
+    payload: dict[str, object],
+    x_ingest_token: Optional[str] = Header(default=None),
+) -> dict[str, str]:
+    _check_ingest_token(x_ingest_token)
+    observed_at = _parse_api_datetime(
+        str(payload.get("observed_at")) if payload.get("observed_at") is not None else None,
+        datetime.now(timezone.utc),
+    )
+    database.insert_sample(
+        source=str(payload.get("source") or "unknown"),
+        observed_at=observed_at,
+        grid_usage_watts=float(payload["grid_usage_watts"]) if payload.get("grid_usage_watts") is not None else None,
+        solar_generation_watts=float(payload["solar_generation_watts"]) if payload.get("solar_generation_watts") is not None else None,
+        raw_payload=payload.get("raw_payload") if isinstance(payload.get("raw_payload"), dict) else None,
+    )
+    return {"status": "ok"}
+
+
+@app.post("/api/ingest/status")
+async def api_ingest_status(
+    payload: dict[str, object],
+    x_ingest_token: Optional[str] = Header(default=None),
+) -> dict[str, str]:
+    _check_ingest_token(x_ingest_token)
+    await coordinator.statuses.update(
+        str(payload.get("name") or "unknown"),
+        state=str(payload["state"]) if payload.get("state") is not None else None,
+        error=str(payload["error"]) if payload.get("error") is not None else None,
+        details=payload.get("details") if isinstance(payload.get("details"), dict) else None,
+        mark_success=bool(payload.get("mark_success")),
+    )
+    return {"status": "ok"}

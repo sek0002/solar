@@ -332,12 +332,6 @@ input[type="range"] {
   overflow: hidden;
 }
 
-#hourly-chart,
-#weekly-chart,
-#monthly-chart {
-  height: 200px;
-}
-
 .metric-reading {
   display: grid;
   gap: 3px;
