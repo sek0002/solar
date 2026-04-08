@@ -53,6 +53,36 @@ body {
   margin: 32px auto 48px;
 }
 
+.page-tabs {
+  display: inline-flex;
+  gap: 8px;
+  margin-bottom: 18px;
+  padding: 8px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  box-shadow: var(--shadow);
+}
+
+.page-tab {
+  padding: 10px 16px;
+  border-radius: 12px;
+  color: var(--muted);
+  text-decoration: none;
+  font-weight: 600;
+  transition: background 0.18s ease, color 0.18s ease;
+}
+
+.page-tab:hover {
+  color: var(--text);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+.page-tab.is-active {
+  color: var(--text);
+  background: color-mix(in srgb, var(--accent) 18%, white 8%);
+}
+
 .topbar,
 .grid,
 .charts-grid {
@@ -436,6 +466,16 @@ input[type="range"] {
 
   .topbar {
     grid-template-columns: 1fr;
+  }
+
+  .page-tabs {
+    width: 100%;
+    justify-content: stretch;
+  }
+
+  .page-tab {
+    flex: 1 1 0;
+    text-align: center;
   }
 
   .controls-inline {

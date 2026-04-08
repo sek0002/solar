@@ -137,7 +137,7 @@ function buildChartTheme() {
   return {
     paper_bgcolor: "rgba(0,0,0,0)",
     plot_bgcolor: dark ? "#132134" : "#ffffff",
-    margin: { t: 18, r: 18, b: 44, l: 56 },
+    margin: { t: 12, r: 12, b: 34, l: 46 },
     hovermode: "x unified",
     hoverlabel: {
       bgcolor: dark ? "rgba(13, 22, 35, 0.96)" : "rgba(255,255,255,0.95)",
@@ -160,7 +160,7 @@ function buildChartTheme() {
     },
     legend: {
       orientation: "h",
-      y: -0.18,
+      y: -0.14,
       x: 0,
       font: { color: dark ? "#c5d3e6" : "#5e6b7d", size: 12 },
       bgcolor: "rgba(0,0,0,0)"
@@ -367,7 +367,7 @@ function buildNowLine(xValue) {
 }
 
 function getChartHeight() {
-  return 360;
+  return 270;
 }
 
 function resizeCharts() {

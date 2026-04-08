@@ -149,6 +149,27 @@ def _build_byd_page(statuses: list[dict[str, object]], latest_samples: list[dict
       margin: 0 auto;
       padding: 32px 20px 48px;
     }}
+    .page-tabs {{
+      display: inline-flex;
+      gap: 8px;
+      margin-bottom: 18px;
+      padding: 8px;
+      background: rgba(17, 24, 39, 0.88);
+      border: 1px solid rgba(148, 163, 184, 0.22);
+      border-radius: 18px;
+      box-shadow: 0 10px 24px rgba(0, 0, 0, 0.18);
+    }}
+    .page-tab {{
+      padding: 10px 16px;
+      border-radius: 12px;
+      color: var(--muted);
+      text-decoration: none;
+      font-weight: 700;
+    }}
+    .page-tab.is-active {{
+      color: var(--text);
+      background: rgba(56, 189, 248, 0.16);
+    }}
     h1 {{
       margin: 0 0 8px;
       font-size: 2rem;
@@ -212,6 +233,10 @@ def _build_byd_page(statuses: list[dict[str, object]], latest_samples: list[dict
 </head>
 <body>
   <main>
+    <nav class="page-tabs" aria-label="Pages">
+      <a class="page-tab" href="/">Dashboard</a>
+      <a class="page-tab is-active" href="/byd">BYD</a>
+    </nav>
     <h1>BYD Vehicle Status</h1>
     <p class="subtitle">Self-contained BYD page generated from the latest stored poller sample and status.</p>
     <section class="grid">
