@@ -66,7 +66,19 @@ def _format_byd_page_value(value: object, suffix: str = "") -> str:
     return f"{value}{suffix}"
 
 
-def _build_byd_page(statuses: list[dict[str, object]], latest_samples: list[dict[str, object]]) -> str:
+def _read_byd_re_status_html() -> Optional[str]:
+    status_path = Path(settings.byd_re_dir).expanduser() / "status.html"
+    if not status_path.exists():
+        return None
+    try:
+        return status_path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+
+
+def _build_byd_page(
+    statuses: list[dict[str, object]], latest_samples: list[dict[str, object]], *, compact: bool = False
+) -> str:
     status = next((item for item in statuses if item.get("name") == "byd_ev"), None)
     sample = next((item for item in latest_samples if item.get("source") == "byd_ev"), None)
     details = dict(status.get("details") or {}) if status else {}
@@ -82,23 +94,35 @@ def _build_byd_page(statuses: list[dict[str, object]], latest_samples: list[dict
     last_error = status.get("last_error") if status else None
     last_success = status.get("last_success_at") if status else None
 
-    cards = [
-        ("State", _format_byd_page_value(state)),
-        ("VIN", _format_byd_page_value(pick("vin"))),
-        ("Model", _format_byd_page_value(pick("model_name"))),
-        ("SoC", _format_byd_page_value(pick("soc_percent"), "%")),
-        ("Range", _format_byd_page_value(pick("range_km"), " km")),
-        ("Charging", _format_byd_page_value(pick("charging_state"))),
-        ("Connected", _format_byd_page_value(pick("is_connected"))),
-        ("Charging now", _format_byd_page_value(pick("is_charging"))),
-        ("Power", _format_byd_page_value(pick("power_w"), " W")),
-        ("Mileage", _format_byd_page_value(pick("total_mileage_km"), " km")),
-        ("Inside temp", _format_byd_page_value(pick("inside_temp_c"), " C")),
-        ("Outside temp", _format_byd_page_value(pick("outside_temp_c"), " C")),
-        ("ETA", _format_byd_page_value(pick("time_to_full_minutes"), " min")),
-        ("Observed at", _format_byd_page_value(observed_at)),
-        ("Last success", _format_byd_page_value(last_success)),
-    ]
+    if compact:
+        cards = [
+            ("SoC", _format_byd_page_value(pick("soc_percent"), "%")),
+            ("Range", _format_byd_page_value(pick("range_km"), " km")),
+            ("Charging", _format_byd_page_value(pick("charging_state"))),
+            ("Connected", _format_byd_page_value(pick("is_connected"))),
+            ("Power", _format_byd_page_value(pick("power_w"), " W")),
+            ("ETA", _format_byd_page_value(pick("time_to_full_minutes"), " min")),
+            ("Mileage", _format_byd_page_value(pick("total_mileage_km"), " km")),
+            ("Model", _format_byd_page_value(pick("model_name"))),
+        ]
+    else:
+        cards = [
+            ("State", _format_byd_page_value(state)),
+            ("VIN", _format_byd_page_value(pick("vin"))),
+            ("Model", _format_byd_page_value(pick("model_name"))),
+            ("SoC", _format_byd_page_value(pick("soc_percent"), "%")),
+            ("Range", _format_byd_page_value(pick("range_km"), " km")),
+            ("Charging", _format_byd_page_value(pick("charging_state"))),
+            ("Connected", _format_byd_page_value(pick("is_connected"))),
+            ("Charging now", _format_byd_page_value(pick("is_charging"))),
+            ("Power", _format_byd_page_value(pick("power_w"), " W")),
+            ("Mileage", _format_byd_page_value(pick("total_mileage_km"), " km")),
+            ("Inside temp", _format_byd_page_value(pick("inside_temp_c"), " C")),
+            ("Outside temp", _format_byd_page_value(pick("outside_temp_c"), " C")),
+            ("ETA", _format_byd_page_value(pick("time_to_full_minutes"), " min")),
+            ("Observed at", _format_byd_page_value(observed_at)),
+            ("Last success", _format_byd_page_value(last_success)),
+        ]
 
     card_html = "".join(
         f"""
@@ -111,7 +135,7 @@ def _build_byd_page(statuses: list[dict[str, object]], latest_samples: list[dict
     )
 
     error_html = ""
-    if last_error:
+    if last_error and not compact:
         error_html = f"""
         <section class="error-box">
           <strong>Last error</strong>
@@ -120,6 +144,42 @@ def _build_byd_page(statuses: list[dict[str, object]], latest_samples: list[dict
         """
 
     raw_json = html.escape(str(raw_payload))
+    nav_html = ""
+    heading_html = ""
+    details_html = ""
+    main_class = "compact-main" if compact else ""
+    body_class = "compact-body" if compact else ""
+    grid_class = "grid compact-grid" if compact else "grid"
+    subtitle_text = "Self-contained BYD page generated from the latest stored poller sample and status."
+
+    if compact:
+        heading_html = f"""
+    <section class="compact-header">
+      <div>
+        <h1>BYD vehicle status</h1>
+        <p>{html.escape(str(_format_byd_page_value(pick("vin"))))}</p>
+      </div>
+      <div class="compact-state">{html.escape(str(_format_byd_page_value(state)))}</div>
+    </section>
+        """
+    else:
+        nav_html = """
+    <nav class="page-tabs" aria-label="Pages">
+      <a class="page-tab" href="/">Dashboard</a>
+      <a class="page-tab is-active" href="/byd">BYD</a>
+    </nav>
+        """
+        heading_html = f"""
+    <h1>BYD Vehicle Status</h1>
+    <p class="subtitle">{subtitle_text}</p>
+        """
+        details_html = f"""
+    <details>
+      <summary>Raw payload</summary>
+      <pre>{raw_json}</pre>
+    </details>
+        """
+
     return f"""<!doctype html>
 <html lang="en">
 <head>
@@ -144,10 +204,18 @@ def _build_byd_page(statuses: list[dict[str, object]], latest_samples: list[dict
       background: linear-gradient(180deg, #0f172a 0%, #111827 100%);
       color: var(--text);
     }}
+    body.compact-body {{
+      background: transparent;
+      overflow: hidden;
+    }}
     main {{
       max-width: 1100px;
       margin: 0 auto;
       padding: 32px 20px 48px;
+    }}
+    .compact-main {{
+      max-width: none;
+      padding: 12px;
     }}
     .page-tabs {{
       display: inline-flex;
@@ -174,6 +242,34 @@ def _build_byd_page(statuses: list[dict[str, object]], latest_samples: list[dict
       margin: 0 0 8px;
       font-size: 2rem;
     }}
+    .compact-header {{
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 12px;
+    }}
+    .compact-header h1 {{
+      margin: 0;
+      font-size: 1.1rem;
+    }}
+    .compact-header p {{
+      margin: 4px 0 0;
+      color: var(--muted);
+      font-size: 0.78rem;
+      word-break: break-word;
+    }}
+    .compact-state {{
+      padding: 6px 10px;
+      border-radius: 999px;
+      background: rgba(56, 189, 248, 0.16);
+      color: var(--text);
+      font-size: 0.78rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      white-space: nowrap;
+    }}
     .subtitle {{
       margin: 0 0 24px;
       color: var(--muted);
@@ -183,12 +279,21 @@ def _build_byd_page(statuses: list[dict[str, object]], latest_samples: list[dict
       grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
       gap: 14px;
     }}
+    .compact-grid {{
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+    }}
     .metric {{
       background: rgba(17, 24, 39, 0.88);
       border: 1px solid rgba(148, 163, 184, 0.22);
       border-radius: 16px;
       padding: 16px;
       box-shadow: 0 10px 24px rgba(0, 0, 0, 0.18);
+    }}
+    .compact-grid .metric {{
+      padding: 10px 12px;
+      border-radius: 14px;
+      box-shadow: none;
     }}
     .metric-label {{
       font-size: 0.82rem;
@@ -201,6 +306,14 @@ def _build_byd_page(statuses: list[dict[str, object]], latest_samples: list[dict
       font-size: 1.15rem;
       font-weight: 700;
       word-break: break-word;
+    }}
+    .compact-grid .metric-label {{
+      font-size: 0.72rem;
+      margin-bottom: 4px;
+    }}
+    .compact-grid .metric-value {{
+      font-size: 0.95rem;
+      line-height: 1.2;
     }}
     .error-box {{
       margin-top: 24px;
@@ -231,22 +344,15 @@ def _build_byd_page(statuses: list[dict[str, object]], latest_samples: list[dict
     }}
   </style>
 </head>
-<body>
-  <main>
-    <nav class="page-tabs" aria-label="Pages">
-      <a class="page-tab" href="/">Dashboard</a>
-      <a class="page-tab is-active" href="/byd">BYD</a>
-    </nav>
-    <h1>BYD Vehicle Status</h1>
-    <p class="subtitle">Self-contained BYD page generated from the latest stored poller sample and status.</p>
-    <section class="grid">
+<body class="{body_class}">
+  <main class="{main_class}">
+    {nav_html}
+    {heading_html}
+    <section class="{grid_class}">
       {card_html}
     </section>
     {error_html}
-    <details>
-      <summary>Raw payload</summary>
-      <pre>{raw_json}</pre>
-    </details>
+    {details_html}
   </main>
 </body>
 </html>"""
@@ -284,10 +390,14 @@ async def index(request: Request) -> HTMLResponse:
 
 
 @app.get("/byd", response_class=HTMLResponse)
-async def byd_page() -> HTMLResponse:
+async def byd_page(embed: bool = Query(default=False)) -> HTMLResponse:
+    if not embed:
+        status_html = _read_byd_re_status_html()
+        if status_html:
+            return HTMLResponse(status_html)
     latest_samples = database.get_latest_samples()
     statuses = _with_network_ble_placeholder(await coordinator.statuses.snapshot())
-    return HTMLResponse(_build_byd_page(statuses, latest_samples))
+    return HTMLResponse(_build_byd_page(statuses, latest_samples, compact=embed))
 
 
 @app.get("/api/samples")
