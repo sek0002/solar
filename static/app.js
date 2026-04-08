@@ -1173,6 +1173,14 @@ function renderEnergyBars(element, chartKey, title, bars) {
       name: "Site solar",
       marker: { color: dark ? "#8ee29d" : "#7cc98a" },
       hovertemplate: "<b>Site solar</b><br>%{x}<br>%{y:.3f} kWh<extra></extra>"
+    },
+    {
+      x: bars.map((item) => item.label),
+      y: bars.map((item) => item.ev),
+      type: "bar",
+      name: "BYD EV",
+      marker: { color: dark ? "#ffb45b" : "#d6882e" },
+      hovertemplate: "<b>BYD EV</b><br>%{x}<br>%{y:.3f} kWh<extra></extra>"
     }
   ];
 
@@ -1208,30 +1216,41 @@ function renderEnergyBreakdowns(items) {
   const bleGridItems = items
     .filter((item) => item.source === "ble" && item.grid_usage_watts !== null)
     .sort((left, right) => new Date(left.observed_at) - new Date(right.observed_at));
+  const bydItems = items
+    .filter((item) => item.source === "byd_ev" && item.grid_usage_watts !== null)
+    .sort((left, right) => new Date(left.observed_at) - new Date(right.observed_at));
 
   const solarHourBars = aggregateEnergyByBucket(buildEnergySegments(solarItems, "solar_generation_watts"), getHourKey);
   const gridHourBars = aggregateEnergyByBucket(buildEnergySegments(bleGridItems, "grid_usage_watts"), getHourKey);
+  const bydHourBars = aggregateEnergyByBucket(buildEnergySegments(bydItems, "grid_usage_watts"), getHourKey);
   const solarWeekBars = aggregateEnergyByBucket(buildEnergySegments(solarItems, "solar_generation_watts"), getWeekKey);
   const gridWeekBars = aggregateEnergyByBucket(buildEnergySegments(bleGridItems, "grid_usage_watts"), getWeekKey);
+  const bydWeekBars = aggregateEnergyByBucket(buildEnergySegments(bydItems, "grid_usage_watts"), getWeekKey);
   const solarMonthBars = aggregateEnergyByBucket(buildEnergySegments(solarItems, "solar_generation_watts"), getMonthKey);
   const gridMonthBars = aggregateEnergyByBucket(buildEnergySegments(bleGridItems, "grid_usage_watts"), getMonthKey);
+  const bydMonthBars = aggregateEnergyByBucket(buildEnergySegments(bydItems, "grid_usage_watts"), getMonthKey);
 
-  function combineBars(solarBars, gridBars) {
+  function combineBars(solarBars, gridBars, evBars) {
     const map = new Map();
     solarBars.forEach((item) => {
-      map.set(item.label, { label: item.label, solar: item.value, grid: 0 });
+      map.set(item.label, { label: item.label, solar: item.value, grid: 0, ev: 0 });
     });
     gridBars.forEach((item) => {
-      const existing = map.get(item.label) || { label: item.label, solar: 0, grid: 0 };
+      const existing = map.get(item.label) || { label: item.label, solar: 0, grid: 0, ev: 0 };
       existing.grid = item.value;
+      map.set(item.label, existing);
+    });
+    evBars.forEach((item) => {
+      const existing = map.get(item.label) || { label: item.label, solar: 0, grid: 0, ev: 0 };
+      existing.ev = item.value;
       map.set(item.label, existing);
     });
     return Array.from(map.values()).sort((left, right) => left.label.localeCompare(right.label));
   }
 
-  renderEnergyBars(hourlyChartElement, "hourly-bars", "Hourly cumulative split", combineBars(solarHourBars, gridHourBars));
-  renderEnergyBars(weeklyChartElement, "weekly-bars", "Weekly cumulative split", combineBars(solarWeekBars, gridWeekBars));
-  renderEnergyBars(monthlyChartElement, "monthly-bars", "Monthly cumulative split", combineBars(solarMonthBars, gridMonthBars));
+  renderEnergyBars(hourlyChartElement, "hourly-bars", "Hourly cumulative split", combineBars(solarHourBars, gridHourBars, bydHourBars));
+  renderEnergyBars(weeklyChartElement, "weekly-bars", "Weekly cumulative split", combineBars(solarWeekBars, gridWeekBars, bydWeekBars));
+  renderEnergyBars(monthlyChartElement, "monthly-bars", "Monthly cumulative split", combineBars(solarMonthBars, gridMonthBars, bydMonthBars));
 }
 
 function renderEmptyCharts() {

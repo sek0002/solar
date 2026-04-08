@@ -92,6 +92,7 @@ class PowerpalBlePoller:
         self._stopped = asyncio.Event()
         self._melbourne_tz = pytz.timezone(settings.timezone_name)
         self._remote_client: Optional[httpx.AsyncClient] = None
+        self._failure_started_at: Optional[datetime] = None
 
     @staticmethod
     def convert_pairing_code(original_pairing_code: str) -> bytes:
@@ -153,6 +154,8 @@ class PowerpalBlePoller:
                 await self._update_status("ble", state="connecting", details={"mac": self.settings.ble_mac})
                 await self._run_session()
                 if not self._stopped.is_set():
+                    if self._failure_started_at is None:
+                        self._failure_started_at = datetime.now(timezone.utc)
                     await self._update_status(
                         "ble",
                         state="disconnected",
@@ -162,6 +165,8 @@ class PowerpalBlePoller:
                     await asyncio.sleep(self.settings.ble_retry_delay_seconds)
             except BleakError as exc:
                 LOGGER.warning("BLE error: %s", exc)
+                if self._failure_started_at is None:
+                    self._failure_started_at = datetime.now(timezone.utc)
                 await self._record_error_fallback(str(exc))
                 await self._update_status(
                     "ble",
@@ -172,6 +177,8 @@ class PowerpalBlePoller:
                 await asyncio.sleep(self.settings.ble_retry_delay_seconds)
             except Exception as exc:
                 LOGGER.exception("Unexpected BLE failure")
+                if self._failure_started_at is None:
+                    self._failure_started_at = datetime.now(timezone.utc)
                 await self._record_error_fallback(str(exc))
                 await self._update_status(
                     "ble",
@@ -259,7 +266,12 @@ class PowerpalBlePoller:
             column="grid_usage_watts",
             count=self.settings.failure_average_window,
         )
-        if average_grid is None:
+        zero_fallback = False
+        if self._failure_started_at is not None:
+            streak_minutes = (datetime.now(timezone.utc) - self._failure_started_at).total_seconds() / 60.0
+            zero_fallback = streak_minutes >= self.settings.ble_zero_after_minutes
+
+        if average_grid is None or zero_fallback:
             average_grid = 0.0
 
         self.database.insert_sample(
@@ -271,11 +283,15 @@ class PowerpalBlePoller:
                 "imputed": True,
                 "fallback_reason": error_message,
                 "average_window": self.settings.failure_average_window,
+                "failure_started_at": self._failure_started_at.isoformat() if self._failure_started_at else None,
+                "zero_after_minutes": self.settings.ble_zero_after_minutes,
+                "zero_fallback": zero_fallback,
             },
         )
 
     async def _on_notification(self, data: bytearray) -> None:
         sample = self._parse_notification(data)
+        self._failure_started_at = None
         self.database.insert_sample(
             source="ble",
             observed_at=sample["observed_at"],

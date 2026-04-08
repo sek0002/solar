@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html
 import logging
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
@@ -36,6 +37,196 @@ def _parse_api_datetime(value: Optional[str], fallback: datetime) -> datetime:
     return parsed
 
 
+def _with_network_ble_placeholder(statuses: list[dict[str, object]]) -> list[dict[str, object]]:
+    if settings.ble_enabled:
+        return statuses
+    if any(item.get("name") in {"ble", "network_ble"} for item in statuses):
+        return statuses
+    return [
+        {
+            "name": "network_ble",
+            "state": "waiting",
+            "last_success_at": None,
+            "last_error_at": None,
+            "last_error": None,
+            "details": {
+                "mode": "remote",
+                "message": "Waiting for BLE samples/status from a remote poller",
+            },
+        },
+        *statuses,
+    ]
+
+
+def _format_byd_page_value(value: object, suffix: str = "") -> str:
+    if value is None or value == "":
+        return "-"
+    if isinstance(value, float):
+        return f"{value:.1f}{suffix}"
+    return f"{value}{suffix}"
+
+
+def _build_byd_page(statuses: list[dict[str, object]], latest_samples: list[dict[str, object]]) -> str:
+    status = next((item for item in statuses if item.get("name") == "byd_ev"), None)
+    sample = next((item for item in latest_samples if item.get("source") == "byd_ev"), None)
+    details = dict(status.get("details") or {}) if status else {}
+    raw_payload = dict(sample.get("raw_payload") or {}) if sample else {}
+
+    def pick(key: str) -> object:
+        if key in raw_payload and raw_payload.get(key) not in (None, ""):
+            return raw_payload.get(key)
+        return details.get(key)
+
+    observed_at = sample.get("observed_at") if sample else None
+    state = status.get("state") if status else "missing"
+    last_error = status.get("last_error") if status else None
+    last_success = status.get("last_success_at") if status else None
+
+    cards = [
+        ("State", _format_byd_page_value(state)),
+        ("VIN", _format_byd_page_value(pick("vin"))),
+        ("Model", _format_byd_page_value(pick("model_name"))),
+        ("SoC", _format_byd_page_value(pick("soc_percent"), "%")),
+        ("Range", _format_byd_page_value(pick("range_km"), " km")),
+        ("Charging", _format_byd_page_value(pick("charging_state"))),
+        ("Connected", _format_byd_page_value(pick("is_connected"))),
+        ("Charging now", _format_byd_page_value(pick("is_charging"))),
+        ("Power", _format_byd_page_value(pick("power_w"), " W")),
+        ("Mileage", _format_byd_page_value(pick("total_mileage_km"), " km")),
+        ("Inside temp", _format_byd_page_value(pick("inside_temp_c"), " C")),
+        ("Outside temp", _format_byd_page_value(pick("outside_temp_c"), " C")),
+        ("ETA", _format_byd_page_value(pick("time_to_full_minutes"), " min")),
+        ("Observed at", _format_byd_page_value(observed_at)),
+        ("Last success", _format_byd_page_value(last_success)),
+    ]
+
+    card_html = "".join(
+        f"""
+        <article class="metric">
+          <div class="metric-label">{html.escape(label)}</div>
+          <div class="metric-value">{html.escape(str(value))}</div>
+        </article>
+        """
+        for label, value in cards
+    )
+
+    error_html = ""
+    if last_error:
+        error_html = f"""
+        <section class="error-box">
+          <strong>Last error</strong>
+          <pre>{html.escape(str(last_error))}</pre>
+        </section>
+        """
+
+    raw_json = html.escape(str(raw_payload))
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>BYD Status</title>
+  <style>
+    :root {{
+      color-scheme: light dark;
+      --bg: #0f172a;
+      --panel: #111827;
+      --card: #1f2937;
+      --text: #e5e7eb;
+      --muted: #94a3b8;
+      --accent: #38bdf8;
+      --error: #fecaca;
+      --error-bg: #7f1d1d;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }}
+    body {{
+      margin: 0;
+      background: linear-gradient(180deg, #0f172a 0%, #111827 100%);
+      color: var(--text);
+    }}
+    main {{
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 32px 20px 48px;
+    }}
+    h1 {{
+      margin: 0 0 8px;
+      font-size: 2rem;
+    }}
+    .subtitle {{
+      margin: 0 0 24px;
+      color: var(--muted);
+    }}
+    .grid {{
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 14px;
+    }}
+    .metric {{
+      background: rgba(17, 24, 39, 0.88);
+      border: 1px solid rgba(148, 163, 184, 0.22);
+      border-radius: 16px;
+      padding: 16px;
+      box-shadow: 0 10px 24px rgba(0, 0, 0, 0.18);
+    }}
+    .metric-label {{
+      font-size: 0.82rem;
+      color: var(--muted);
+      margin-bottom: 8px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }}
+    .metric-value {{
+      font-size: 1.15rem;
+      font-weight: 700;
+      word-break: break-word;
+    }}
+    .error-box {{
+      margin-top: 24px;
+      padding: 16px;
+      border-radius: 16px;
+      background: rgba(127, 29, 29, 0.92);
+      color: var(--error);
+      border: 1px solid rgba(248, 113, 113, 0.35);
+    }}
+    pre {{
+      white-space: pre-wrap;
+      word-break: break-word;
+      margin: 10px 0 0;
+      font-size: 0.92rem;
+      line-height: 1.45;
+    }}
+    details {{
+      margin-top: 24px;
+      background: rgba(17, 24, 39, 0.82);
+      border: 1px solid rgba(148, 163, 184, 0.2);
+      border-radius: 16px;
+      padding: 16px;
+    }}
+    summary {{
+      cursor: pointer;
+      color: var(--accent);
+      font-weight: 700;
+    }}
+  </style>
+</head>
+<body>
+  <main>
+    <h1>BYD Vehicle Status</h1>
+    <p class="subtitle">Self-contained BYD page generated from the latest stored poller sample and status.</p>
+    <section class="grid">
+      {card_html}
+    </section>
+    {error_html}
+    <details>
+      <summary>Raw payload</summary>
+      <pre>{raw_json}</pre>
+    </details>
+  </main>
+</body>
+</html>"""
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     await coordinator.start()
@@ -52,7 +243,7 @@ app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="stat
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request) -> HTMLResponse:
     latest_samples = database.get_latest_samples()
-    statuses = await coordinator.statuses.snapshot()
+    statuses = _with_network_ble_placeholder(await coordinator.statuses.snapshot())
     return templates.TemplateResponse(
         request,
         "index.html",
@@ -65,6 +256,13 @@ async def index(request: Request) -> HTMLResponse:
             "statuses": statuses,
         },
     )
+
+
+@app.get("/byd", response_class=HTMLResponse)
+async def byd_page() -> HTMLResponse:
+    latest_samples = database.get_latest_samples()
+    statuses = _with_network_ble_placeholder(await coordinator.statuses.snapshot())
+    return HTMLResponse(_build_byd_page(statuses, latest_samples))
 
 
 @app.get("/api/samples")
@@ -88,7 +286,7 @@ async def api_samples(
 @app.get("/api/status")
 async def api_status() -> dict[str, object]:
     return {
-        "pollers": await coordinator.statuses.snapshot(),
+        "pollers": _with_network_ble_placeholder(await coordinator.statuses.snapshot()),
         "latest_samples": database.get_latest_samples(),
     }
 

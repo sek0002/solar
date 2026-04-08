@@ -47,6 +47,7 @@ class Settings:
     ble_pulses_per_kwh: float = _env_float("BLE_PULSES_PER_KWH", 1000.0)
     ble_retry_delay_seconds: float = _env_float("BLE_RETRY_DELAY_SECONDS", 5.0)
     ble_connection_timeout_seconds: float = _env_float("BLE_CONNECTION_TIMEOUT_SECONDS", 30.0)
+    ble_zero_after_minutes: float = _env_float("BLE_ZERO_AFTER_MINUTES", 10.0)
     remote_ingest_url: str = os.getenv("REMOTE_INGEST_URL", "").rstrip("/")
     remote_ingest_token: str = os.getenv("REMOTE_INGEST_TOKEN", "")
     ingest_token: str = os.getenv("INGEST_TOKEN", "")
