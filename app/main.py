@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import html
 import logging
+import re
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -76,6 +77,80 @@ def _read_byd_re_status_html() -> Optional[str]:
         return None
 
 
+def _decorate_byd_re_status_html(status_html: str) -> str:
+    dark_style = """
+<style id="solar-byd-dark-override">
+  :root { color-scheme: dark; }
+  html, body {
+    background: #0f172a !important;
+    color: #e5e7eb !important;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif !important;
+  }
+  body {
+    margin: 0 !important;
+    padding: 24px 20px 36px !important;
+  }
+  .solar-byd-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin: 0 auto 20px;
+    max-width: 1200px;
+  }
+  .solar-byd-back {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 16px;
+    border-radius: 999px;
+    background: rgba(56, 189, 248, 0.16);
+    color: #e5e7eb !important;
+    text-decoration: none;
+    font-weight: 700;
+  }
+  .solar-byd-back:hover {
+    background: rgba(56, 189, 248, 0.26);
+  }
+  .solar-byd-title {
+    color: #94a3b8;
+    font-size: 0.9rem;
+  }
+  .container, main, .content, .wrapper {
+    max-width: 1200px;
+    margin-left: auto !important;
+    margin-right: auto !important;
+  }
+  .card, .panel, table, section, article, .metric, .tile {
+    background: rgba(17, 24, 39, 0.88) !important;
+    color: #e5e7eb !important;
+    border-color: rgba(148, 163, 184, 0.18) !important;
+  }
+  h1, h2, h3, h4, h5, h6, strong, b, th, td, p, span, div, li, label {
+    color: inherit;
+  }
+  a { color: #38bdf8 !important; }
+</style>
+"""
+    toolbar = """
+<div class="solar-byd-toolbar">
+  <a class="solar-byd-back" href="/">Return to dashboard</a>
+  <div class="solar-byd-title">Live BYD-re status page</div>
+</div>
+"""
+    if "solar-byd-dark-override" in status_html:
+        return status_html
+    if "</head>" in status_html:
+        status_html = status_html.replace("</head>", f"{dark_style}</head>", 1)
+    else:
+        status_html = dark_style + status_html
+    if "<body" in status_html:
+        status_html = re.sub(r"(<body[^>]*>)", r"\1" + toolbar, status_html, count=1, flags=re.IGNORECASE)
+    else:
+        status_html = toolbar + status_html
+    return status_html
+
+
 def _build_byd_page(
     statuses: list[dict[str, object]], latest_samples: list[dict[str, object]], *, compact: bool = False
 ) -> str:
@@ -96,6 +171,7 @@ def _build_byd_page(
 
     if compact:
         cards = [
+            ("State", _format_byd_page_value(state)),
             ("SoC", _format_byd_page_value(pick("soc_percent"), "%")),
             ("Range", _format_byd_page_value(pick("range_km"), " km")),
             ("Charging", _format_byd_page_value(pick("charging_state"))),
@@ -104,6 +180,10 @@ def _build_byd_page(
             ("ETA", _format_byd_page_value(pick("time_to_full_minutes"), " min")),
             ("Mileage", _format_byd_page_value(pick("total_mileage_km"), " km")),
             ("Model", _format_byd_page_value(pick("model_name"))),
+            ("VIN", _format_byd_page_value(pick("vin"))),
+            ("Charging now", _format_byd_page_value(pick("is_charging"))),
+            ("Last success", _format_byd_page_value(last_success)),
+            ("Observed", _format_byd_page_value(observed_at)),
         ]
     else:
         cards = [
@@ -280,7 +360,7 @@ def _build_byd_page(
       gap: 14px;
     }}
     .compact-grid {{
-      grid-template-columns: repeat(2, minmax(0, 1fr));
+      grid-template-columns: repeat(3, minmax(0, 1fr));
       gap: 8px;
     }}
     .metric {{
@@ -394,7 +474,7 @@ async def byd_page(embed: bool = Query(default=False)) -> HTMLResponse:
     if not embed:
         status_html = _read_byd_re_status_html()
         if status_html:
-            return HTMLResponse(status_html)
+            return HTMLResponse(_decorate_byd_re_status_html(status_html))
     latest_samples = database.get_latest_samples()
     statuses = _with_network_ble_placeholder(await coordinator.statuses.snapshot())
     return HTMLResponse(_build_byd_page(statuses, latest_samples, compact=embed))
