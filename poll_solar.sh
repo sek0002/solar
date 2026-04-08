@@ -18,4 +18,4 @@ if [ "${POLLER_ONLY:-false}" = "true" ]; then
   exec python3 -m app.poller_only
 fi
 
-exec python3 -m uvicorn app.main:app --host 0.0.0.0 --port 8000
+exec python3 -m uvicorn app.main:app --host 0.0.0.0 --port 8001

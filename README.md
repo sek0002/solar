@@ -42,10 +42,10 @@ Examples:
 python3 -m venv --system-site-packages .venv
 source .venv/bin/activate
 python3 -m pip install -r requirements.txt
-python3 -m uvicorn app.main:app --reload
+python3 -m uvicorn app.main:app --reload --port 8001
 ```
 
-Open [http://localhost:8000](http://localhost:8000).
+Open [http://localhost:8001](http://localhost:8001).
 
 ## Run as a Raspberry Pi service
 
@@ -69,7 +69,7 @@ To run a Raspberry Pi as a collector-only node that forwards data to another ser
 
 ```env
 POLLER_ONLY=true
-REMOTE_INGEST_URL=http://your-server:8000
+REMOTE_INGEST_URL=http://your-server:8001
 REMOTE_INGEST_TOKEN=your-shared-token
 BLE_ENABLED=true
 LOCAL_SITE_ENABLED=false
@@ -78,7 +78,7 @@ BYD_ENABLED=false
 
 In that mode, `poll_solar.sh` runs only the pollers and does not start `uvicorn`.
 
-If you want port 80 instead of port 8000, either put nginx in front of the app or grant the venv Python permission to bind low ports:
+If you want port 80 instead of port 8001, either put nginx in front of the app or grant the venv Python permission to bind low ports:
 
 ```bash
 sudo setcap 'cap_net_bind_service=+ep' /opt/solar-monitor/.venv/bin/python3
@@ -101,7 +101,7 @@ View logs:
 journalctl -u solar-monitor -f
 ```
 
-The browser UI will then be available at [http://raspberrypi.local:8000](http://raspberrypi.local:8000) or `http://<pi-ip>:8000`.
+The browser UI will then be available at [http://raspberrypi.local:8001](http://raspberrypi.local:8001) or `http://<pi-ip>:8001`.
 
 If `pip install -r requirements.txt` hangs or spends a long time building `uvloop` on the Raspberry Pi, use the plain `uvicorn` dependency in this repo. The app does not need `uvicorn[standard]` for the Pi service setup.
 
