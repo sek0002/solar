@@ -8,6 +8,7 @@ import logging
 import os
 import re
 import struct
+import sys
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -889,7 +890,7 @@ class BydEvPoller:
     async def _fetch_sample(self) -> dict[str, Any]:
         env = os.environ.copy()
         process = await asyncio.create_subprocess_exec(
-            self.settings.byd_python_bin,
+            sys.executable,
             str(self._script_path),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,

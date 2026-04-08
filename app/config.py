@@ -73,7 +73,8 @@ class Settings:
     failure_average_window: int = _env_int("FAILURE_AVERAGE_WINDOW", 3)
 
     byd_enabled: bool = _env_bool("BYD_ENABLED", False)
-    byd_python_bin: str = os.getenv("BYD_PYTHON_BIN", "python3")
+    byd_node_bin: str = os.getenv("BYD_NODE_BIN", "node")
+    byd_re_dir: str = os.getenv("BYD_RE_DIR", "/opt/byd-re")
     byd_vin: str = os.getenv("BYD_VIN", "")
     byd_poll_seconds: float = _env_float("BYD_POLL_SECONDS", 60.0)
     byd_command_timeout_seconds: float = _env_float("BYD_COMMAND_TIMEOUT_SECONDS", 120.0)
