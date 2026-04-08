@@ -184,6 +184,9 @@ def _build_byd_page(
             ("Charging now", _format_byd_page_value(pick("is_charging"))),
             ("Last success", _format_byd_page_value(last_success)),
             ("Observed", _format_byd_page_value(observed_at)),
+            ("Inside temp", _format_byd_page_value(pick("inside_temp_c"), " C")),
+            ("Outside temp", _format_byd_page_value(pick("outside_temp_c"), " C")),
+            ("Brand", _format_byd_page_value(pick("brand_name"))),
         ]
     else:
         cards = [
@@ -360,7 +363,7 @@ def _build_byd_page(
       gap: 14px;
     }}
     .compact-grid {{
-      grid-template-columns: repeat(3, minmax(0, 1fr));
+      grid-template-columns: repeat(4, minmax(0, 1fr));
       gap: 8px;
     }}
     .metric {{
