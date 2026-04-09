@@ -229,7 +229,7 @@ body {
   text-align: center;
   align-content: center;
   gap: 3px;
-  transform: translateY(-4px);
+  transform: translateY(-1px);
 }
 
 .topbar-gauge-label {
@@ -238,6 +238,7 @@ body {
   text-transform: uppercase;
   letter-spacing: 0.12em;
   line-height: 1;
+  margin-bottom: 1px;
 }
 
 .topbar-gauge-value {
@@ -249,6 +250,7 @@ body {
   color: var(--muted);
   font-size: 0.64rem;
   line-height: 1.02;
+  margin-top: -1px;
 }
 
 .battery-inline {
