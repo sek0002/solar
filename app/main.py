@@ -216,20 +216,38 @@ def _build_byd_page(
     last_error = status.get("last_error") if status else None
     last_success = status.get("last_success_at") if status else None
 
+    data_age_text = "-"
+    if observed_at:
+        try:
+            observed_dt = datetime.fromisoformat(str(observed_at).replace("Z", "+00:00"))
+            if observed_dt.tzinfo is None:
+                observed_dt = observed_dt.replace(tzinfo=timezone.utc)
+            age_seconds = max(0, int((datetime.now(timezone.utc) - observed_dt.astimezone(timezone.utc)).total_seconds()))
+            if age_seconds < 60:
+                data_age_text = f"{age_seconds}s"
+            elif age_seconds < 3600:
+                data_age_text = f"{age_seconds // 60}m"
+            else:
+                hours = age_seconds // 3600
+                minutes = (age_seconds % 3600) // 60
+                data_age_text = f"{hours}h {minutes}m"
+        except ValueError:
+            data_age_text = "-"
+
     if compact:
+        gl_value = raw_payload.get("tracked_power_w")
+        if gl_value in (None, ""):
+            gl_value = raw_payload.get("gl_w")
+        if gl_value in (None, ""):
+            gl_value = pick("power_w")
         cards = [
             ("SoC", _format_byd_page_value(pick("soc_percent"), "%")),
             ("Range", _format_byd_page_value(pick("range_km"), " km")),
-            ("Power", _format_byd_page_value(pick("power_w"), " W")),
+            ("GL", _format_byd_page_value(gl_value, " W/hr")),
             ("Charge ETA", _format_eta_value(pick("time_to_full_minutes"))),
             ("Mileage", _format_byd_page_value(pick("total_mileage_km"), " km")),
-            ("Model", _format_byd_page_value(pick("model_name"))),
-            ("VIN", _format_byd_page_value(pick("vin"))),
-            ("Last success", _format_byd_page_value(last_success)),
-            ("Observed", _format_byd_page_value(observed_at)),
             ("Inside temp", _format_byd_page_value(pick("inside_temp_c"), " C")),
-            ("Outside temp", _format_byd_page_value(pick("outside_temp_c"), " C")),
-            ("Brand", _format_byd_page_value(pick("brand_name"))),
+            ("Data age", data_age_text),
         ]
     else:
         cards = [
@@ -402,7 +420,7 @@ def _build_byd_page(
       gap: 14px;
     }}
     .compact-grid {{
-      grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+      grid-template-columns: repeat(3, minmax(0, 1fr));
       gap: 8px;
       align-items: stretch;
     }}
@@ -450,7 +468,7 @@ def _build_byd_page(
         white-space: normal;
       }}
       .compact-grid {{
-        grid-template-columns: repeat(2, minmax(0, 1fr));
+        grid-template-columns: repeat(3, minmax(0, 1fr));
       }}
     }}
     .error-box {{
