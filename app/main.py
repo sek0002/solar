@@ -155,6 +155,37 @@ def _decorate_byd_re_status_html(status_html: str) -> str:
   }
   a { color: #38bdf8 !important; }
 </style>
+<script id="solar-byd-hide-car">
+window.addEventListener("load", () => {
+  const selectorList = [
+    '[data-testid*="car"]',
+    '[class*="car-panel"]',
+    '[class*="carPanel"]',
+    '[class*="vehicle-panel"]',
+    '[class*="vehiclePanel"]',
+    '[class*="car-card"]',
+    '[class*="vehicle-card"]',
+    '#car',
+    '#vehicle'
+  ];
+
+  const explicitPanel = selectorList
+    .map((selector) => document.querySelector(selector))
+    .find(Boolean);
+
+  const mediaPanel = explicitPanel || Array.from(document.querySelectorAll("section, article, div"))
+    .filter((element) => element.querySelector("img, svg, canvas"))
+    .sort((left, right) => {
+      const leftRect = left.getBoundingClientRect();
+      const rightRect = right.getBoundingClientRect();
+      return (rightRect.width * rightRect.height) - (leftRect.width * leftRect.height);
+    })[0];
+
+  if (mediaPanel) {
+    mediaPanel.remove();
+  }
+});
+</script>
 """
     toolbar = """
 <div class="solar-byd-toolbar">
