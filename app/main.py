@@ -173,16 +173,8 @@ window.addEventListener("load", () => {
     .map((selector) => document.querySelector(selector))
     .find(Boolean);
 
-  const mediaPanel = explicitPanel || Array.from(document.querySelectorAll("section, article, div"))
-    .filter((element) => element.querySelector("img, svg, canvas"))
-    .sort((left, right) => {
-      const leftRect = left.getBoundingClientRect();
-      const rightRect = right.getBoundingClientRect();
-      return (rightRect.width * rightRect.height) - (leftRect.width * leftRect.height);
-    })[0];
-
-  if (mediaPanel) {
-    mediaPanel.remove();
+  if (explicitPanel) {
+    explicitPanel.remove();
   }
 });
 </script>
