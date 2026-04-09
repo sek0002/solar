@@ -51,6 +51,17 @@
         <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Toggle dark mode">
           Dark mode
         </button>
+        <div id="topbar-gauge" class="topbar-gauge" aria-label="Solar generation and BLE gauge">
+          <div class="topbar-gauge-ble-ring"></div>
+          <div class="topbar-gauge-solar-ring">
+            <div class="topbar-gauge-core">
+              <span class="topbar-gauge-label">Solar</span>
+              <strong id="topbar-solar-value" class="topbar-gauge-value">n/a</strong>
+              <small id="topbar-ble-value" class="topbar-gauge-subvalue">BLE n/a</small>
+            </div>
+          </div>
+          <div class="topbar-gauge-inner-ticks"></div>
+        </div>
         <nav class="page-tabs topbar-tabs" aria-label="Pages">
           <a class="page-tab is-active" href="/">Dashboard</a>
           <a class="page-tab" href="/byd">BYD</a>
@@ -60,17 +71,6 @@
       <div class="status-inline">
         <span id="last-refresh" class="last-refresh status-refresh">Loading...</span>
         <div class="status-lower">
-          <div id="topbar-gauge" class="topbar-gauge" aria-label="Solar generation and BLE gauge">
-            <div class="topbar-gauge-ticks"></div>
-            <div class="topbar-gauge-ble-ring"></div>
-            <div class="topbar-gauge-solar-ring">
-              <div class="topbar-gauge-core">
-                <span class="topbar-gauge-label">Solar</span>
-                <strong id="topbar-solar-value" class="topbar-gauge-value">n/a</strong>
-                <small id="topbar-ble-value" class="topbar-gauge-subvalue">BLE n/a</small>
-              </div>
-            </div>
-          </div>
           <div class="battery-inline">
             <div class="ev-battery-meter" aria-label="BLE battery level">
               <div id="ble-battery-fill" class="ble-battery-fill"></div>
