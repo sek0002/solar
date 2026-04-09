@@ -999,7 +999,7 @@ class BydEvPoller:
         while not self._stopped.is_set():
             try:
                 sample = await self._fetch_sample()
-                observed_at = datetime.now(timezone.utc)
+                observed_at = self._resolve_sample_observed_at(sample)
                 self.database.insert_sample(
                     source="byd_ev",
                     observed_at=observed_at,
@@ -1038,6 +1038,19 @@ class BydEvPoller:
 
     async def stop(self) -> None:
         self._stopped.set()
+
+    @staticmethod
+    def _resolve_sample_observed_at(sample: dict[str, Any]) -> datetime:
+        observed_at_text = sample.get("observed_at") or sample.get("realtime_timestamp_utc") or sample.get("charging_update_time_utc")
+        if observed_at_text:
+            try:
+                parsed = datetime.fromisoformat(str(observed_at_text).replace("Z", "+00:00"))
+                if parsed.tzinfo is None:
+                    parsed = parsed.replace(tzinfo=timezone.utc)
+                return parsed.astimezone(timezone.utc)
+            except ValueError:
+                LOGGER.debug("Unable to parse BYD observed_at %r", observed_at_text)
+        return datetime.now(timezone.utc)
 
     async def _fetch_sample(self) -> dict[str, Any]:
         env = os.environ.copy()

@@ -6,8 +6,10 @@ import os
 import re
 import subprocess
 import sys
+from datetime import datetime
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 
 def _pick_first(*values: Any) -> Any:
@@ -36,6 +38,70 @@ def _eta_text_from_minutes(total_minutes: Any) -> str | None:
     hours = rounded // 60
     remainder = rounded % 60
     return f"{hours}h {remainder}m"
+
+
+def _parse_byd_timestamp(
+    value: Any,
+    *,
+    timezone_name: str,
+    reference: datetime | None = None,
+) -> str | None:
+    if value in (None, ""):
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+
+    normalized = re.sub(r"\s+", " ", text.replace(".", ":")).strip()
+    normalized = re.sub(r"\b(am|pm)\b", lambda match: match.group(1).upper(), normalized, flags=re.IGNORECASE)
+    tz = ZoneInfo(timezone_name)
+
+    iso_candidate = normalized.replace("Z", "+00:00")
+    try:
+        parsed = datetime.fromisoformat(iso_candidate)
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=tz)
+        return parsed.astimezone(ZoneInfo("UTC")).isoformat()
+    except ValueError:
+        pass
+
+    formats = [
+        "%Y-%m-%d %I:%M:%S %p",
+        "%Y-%m-%d %I:%M %p",
+        "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%d %H:%M",
+        "%d/%m/%Y %I:%M:%S %p",
+        "%d/%m/%Y %I:%M %p",
+        "%d/%m/%Y %H:%M:%S",
+        "%d/%m/%Y %H:%M",
+        "%m/%d/%Y %I:%M:%S %p",
+        "%m/%d/%Y %I:%M %p",
+        "%m/%d/%Y %H:%M:%S",
+        "%m/%d/%Y %H:%M",
+    ]
+    for fmt in formats:
+        try:
+            parsed = datetime.strptime(normalized, fmt).replace(tzinfo=tz)
+            return parsed.astimezone(ZoneInfo("UTC")).isoformat()
+        except ValueError:
+            continue
+
+    if reference is not None:
+        time_formats = ["%I:%M:%S %p", "%I:%M %p", "%H:%M:%S", "%H:%M"]
+        for fmt in time_formats:
+            try:
+                parsed_time = datetime.strptime(normalized, fmt)
+                combined = reference.astimezone(tz).replace(
+                    hour=parsed_time.hour,
+                    minute=parsed_time.minute,
+                    second=parsed_time.second,
+                    microsecond=0,
+                )
+                return combined.astimezone(ZoneInfo("UTC")).isoformat()
+            except ValueError:
+                continue
+
+    return None
 
 
 def _extract_data_from_status_html(status_html: str) -> tuple[dict[str, Any], Any]:
@@ -113,6 +179,7 @@ def main() -> int:
 
     vehicle_info = data.get("vehicleInfo") or {}
     gps_info = data.get("gps") or {}
+    timezone_name = os.getenv("TIMEZONE", "Australia/Melbourne")
 
     soc_percent = _pick_first(vehicle_info.get("elecPercent"), vehicle_info.get("powerBattery"))
     range_km = _pick_first(vehicle_info.get("enduranceMileage"), vehicle_info.get("evEndurance"))
@@ -130,6 +197,14 @@ def main() -> int:
         time_to_full_minutes = int((remaining_hours or 0.0) * 60 + (remaining_minutes or 0.0))
 
     is_charging, is_connected = _derive_flags(vehicle_info)
+    generated_at_iso = _parse_byd_timestamp(generated_at, timezone_name=timezone_name)
+    generated_at_dt = datetime.fromisoformat(generated_at_iso) if generated_at_iso else None
+    realtime_timestamp = vehicle_info.get("time")
+    parsed_realtime_timestamp = _parse_byd_timestamp(
+        realtime_timestamp,
+        timezone_name=timezone_name,
+        reference=generated_at_dt,
+    )
 
     payload = {
         "vin": vin or (vehicle or {}).get("vin"),
@@ -148,8 +223,11 @@ def main() -> int:
         "power_source": "gl" if gl_w is not None else ("totalPower" if total_power_w is not None else None),
         "charge_rate": _as_float(vehicle_info.get("chargeRate")),
         "total_mileage_km": _as_float(_pick_first(vehicle_info.get("totalMileageV2"), vehicle_info.get("totalMileage"))),
-        "realtime_timestamp": vehicle_info.get("time"),
+        "realtime_timestamp": realtime_timestamp,
+        "realtime_timestamp_utc": parsed_realtime_timestamp,
         "charging_update_time": generated_at,
+        "charging_update_time_utc": generated_at_iso,
+        "observed_at": parsed_realtime_timestamp or generated_at_iso,
         "inside_temp_c": _as_float(vehicle_info.get("tempInCar")),
         "outside_temp_c": _as_float(vehicle_info.get("tempOutCar")),
         "connect_state": vehicle_info.get("connectState"),
