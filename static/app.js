@@ -283,65 +283,6 @@ function getMinuteOfWeek(dateLike) {
   return (day * 24 * 60) + (date.getHours() * 60) + date.getMinutes();
 }
 
-function buildFutureTimeline() {
-  const now = new Date();
-  const points = [];
-  for (let offsetMinutes = 10; offsetMinutes <= 60; offsetMinutes += 10) {
-    points.push(new Date(now.getTime() + offsetMinutes * 60000));
-  }
-  return points;
-}
-
-function buildWeeklyMeanSeries(historySeries, valueKey) {
-  if (!historySeries.length) {
-    return [];
-  }
-
-  const toleranceMinutes = 20;
-  const minuteBuckets = new Map();
-
-  historySeries.forEach((item) => {
-    const value = Number(item[valueKey]);
-    if (Number.isNaN(value)) {
-      return;
-    }
-    const minute = getMinuteOfWeek(item.observed_at);
-    const bucket = minuteBuckets.get(minute) || { sum: 0, count: 0 };
-    bucket.sum += value;
-    bucket.count += 1;
-    minuteBuckets.set(minute, bucket);
-  });
-
-  const minutesPerWeek = 7 * 24 * 60;
-  return buildFutureTimeline().map((futureTime) => {
-    const targetMinute = getMinuteOfWeek(futureTime);
-    let sum = 0;
-    let count = 0;
-
-    for (let offset = -toleranceMinutes; offset <= toleranceMinutes; offset += 1) {
-      const candidateMinute = (targetMinute + offset + minutesPerWeek) % minutesPerWeek;
-      const bucket = minuteBuckets.get(candidateMinute);
-      if (!bucket) {
-        continue;
-      }
-      sum += bucket.sum;
-      count += bucket.count;
-    }
-
-    if (!count) {
-      return {
-        observed_at: futureTime.toISOString(),
-        value: null
-      };
-    }
-
-    return {
-      observed_at: futureTime.toISOString(),
-      value: sum / count
-    };
-  });
-}
-
 function buildNowLine(xValue) {
   const dark = getTheme() === "dark";
   return {
@@ -846,13 +787,12 @@ function renderCumulativeStats(items, pollers = []) {
   `;
 }
 
-function buildRateChart(element, chartKey, title, items, valueKey, colors, historySeries = []) {
+function buildRateChart(element, chartKey, title, items, valueKey, colors) {
   const chartTheme = buildChartTheme();
   const dark = getTheme() === "dark";
   const xValues = items.map((item) => toChartTime(item.observed_at));
   const yKw = items.map((item) => ratePerMinuteToKwPerHour(item[valueKey]));
   const yRate = items.map((item) => Number(item[valueKey]));
-  const weeklyMeanSeries = buildWeeklyMeanSeries(historySeries, valueKey);
   const nowX = xValues.length ? toChartTime(new Date()) : null;
   const traces = [
     {
@@ -875,16 +815,6 @@ function buildRateChart(element, chartKey, title, items, valueKey, colors, histo
       showlegend: false,
       hoverinfo: "skip",
       line: { color: "rgba(0,0,0,0)", width: 0 }
-    },
-    {
-      x: weeklyMeanSeries.filter((item) => item.value !== null).map((item) => toChartTime(item.observed_at)),
-      y: weeklyMeanSeries.filter((item) => item.value !== null).map((item) => ratePerMinuteToKwPerHour(item.value)),
-      customdata: weeklyMeanSeries.filter((item) => item.value !== null).map((item) => Number(item.value)),
-      mode: "lines",
-      name: `${title} weekly mean`,
-      line: { color: colors.line, width: 1.2, dash: "dash" },
-      opacity: 0.35,
-      hovertemplate: buildRateHoverTemplate(`${title} weekly mean`)
     }
   ];
 
@@ -924,25 +854,15 @@ function buildRateChart(element, chartKey, title, items, valueKey, colors, histo
   captureChartState(element, chartKey);
 }
 
-function renderBleSolarChart(items, historyItems) {
+function renderBleSolarChart(items) {
   const dark = getTheme() === "dark";
   const bleGrid = items
-    .filter((item) => item.source === "ble" && item.grid_usage_watts !== null)
-    .sort((left, right) => new Date(left.observed_at) - new Date(right.observed_at));
-  const bleGridHistory = historyItems
     .filter((item) => item.source === "ble" && item.grid_usage_watts !== null)
     .sort((left, right) => new Date(left.observed_at) - new Date(right.observed_at));
   const siteSolar = items
     .filter((item) => item.source === "local_site" && item.solar_generation_watts !== null)
     .sort((left, right) => new Date(left.observed_at) - new Date(right.observed_at));
-  const siteSolarHistory = historyItems
-    .filter((item) => item.source === "local_site" && item.solar_generation_watts !== null)
-    .sort((left, right) => new Date(left.observed_at) - new Date(right.observed_at));
   const evItems = getBydPowerSeries(items);
-  const evHistoryItems = getBydPowerSeries(historyItems);
-  const bleWeeklyMean = buildWeeklyMeanSeries(bleGridHistory, "grid_usage_watts").filter((item) => item.value !== null);
-  const solarWeeklyMean = buildWeeklyMeanSeries(siteSolarHistory, "solar_generation_watts").filter((item) => item.value !== null);
-  const evWeeklyMean = buildWeeklyMeanSeries(evHistoryItems, "power_w").filter((item) => item.value !== null);
 
   const chartTheme = buildChartTheme();
   const nowX = bleGrid.length || siteSolar.length || evItems.length ? toChartTime(new Date()) : null;
@@ -969,16 +889,6 @@ function renderBleSolarChart(items, historyItems) {
       line: { color: "rgba(0,0,0,0)", width: 0 }
     },
     {
-      x: bleWeeklyMean.map((item) => toChartTime(item.observed_at)),
-      y: bleWeeklyMean.map((item) => ratePerMinuteToKwPerHour(item.value)),
-      customdata: bleWeeklyMean.map((item) => Number(item.value)),
-      mode: "lines",
-      name: "BLE grid weekly mean",
-      line: { color: dark ? "#7fb0ff" : "#6f96d8", width: 1.2, dash: "dash" },
-      opacity: 0.35,
-      hovertemplate: buildRateHoverTemplate("BLE grid weekly mean")
-    },
-    {
       x: siteSolar.map((item) => toChartTime(item.observed_at)),
       y: siteSolar.map((item) => ratePerMinuteToKwPerHour(item.solar_generation_watts)),
       customdata: siteSolar.map((item) => Number(item.solar_generation_watts)),
@@ -1000,16 +910,6 @@ function renderBleSolarChart(items, historyItems) {
       line: { color: "rgba(0,0,0,0)", width: 0 }
     },
     {
-      x: solarWeeklyMean.map((item) => toChartTime(item.observed_at)),
-      y: solarWeeklyMean.map((item) => ratePerMinuteToKwPerHour(item.value)),
-      customdata: solarWeeklyMean.map((item) => Number(item.value)),
-      mode: "lines",
-      name: "Site solar weekly mean",
-      line: { color: dark ? "#8ee29d" : "#7cc98a", width: 1.2, dash: "dash" },
-      opacity: 0.35,
-      hovertemplate: buildRateHoverTemplate("Site solar weekly mean")
-    },
-    {
       x: evItems.map((item) => toChartTime(item.observed_at)),
       y: evItems.map((item) => wattsToKw(item.power_w)),
       customdata: evItems.map((item) => Number(item.power_w)),
@@ -1027,16 +927,6 @@ function renderBleSolarChart(items, historyItems) {
       showlegend: false,
       hoverinfo: "skip",
       line: { color: "rgba(0,0,0,0)", width: 0 }
-    },
-    {
-      x: evWeeklyMean.map((item) => toChartTime(item.observed_at)),
-      y: evWeeklyMean.map((item) => wattsToKw(item.value)),
-      customdata: evWeeklyMean.map((item) => Number(item.value)),
-      mode: "lines",
-      name: "BYD EV weekly mean",
-      line: { color: dark ? "#ffb45b" : "#d6882e", width: 1.2, dash: "dash" },
-      opacity: 0.35,
-      hovertemplate: buildPowerHoverTemplate("BYD EV weekly mean")
     }
   ];
 
@@ -1318,21 +1208,18 @@ async function refresh() {
     const start = buildLocalDateTime(selectedDate, selectedTime);
     const safeStart = Number.isNaN(start.getTime()) ? new Date() : start;
     const end = new Date(safeStart.getTime() + hours * 3600000);
-    const [statusResponse, samplesResponse, historyResponse] = await Promise.all([
+    const [statusResponse, samplesResponse] = await Promise.all([
       fetch("/api/status"),
-      fetch(`/api/samples?hours=${hours}&start=${encodeURIComponent(safeStart.toISOString())}&end=${encodeURIComponent(end.toISOString())}`),
-      fetch(`/api/samples?hours=168&end=${encodeURIComponent(new Date().toISOString())}`)
+      fetch(`/api/samples?hours=${hours}&start=${encodeURIComponent(safeStart.toISOString())}&end=${encodeURIComponent(end.toISOString())}`)
     ]);
 
-    if (!statusResponse.ok || !samplesResponse.ok || !historyResponse.ok) {
-      throw new Error(`HTTP ${statusResponse.status}/${samplesResponse.status}/${historyResponse.status}`);
+    if (!statusResponse.ok || !samplesResponse.ok) {
+      throw new Error(`HTTP ${statusResponse.status}/${samplesResponse.status}`);
     }
 
     const statusPayload = await statusResponse.json();
     const samplesPayload = await samplesResponse.json();
-    const historyPayload = await historyResponse.json();
     const items = Array.isArray(samplesPayload.items) ? samplesPayload.items : [];
-    const historyItems = Array.isArray(historyPayload.items) ? historyPayload.items : [];
 
     renderStatusCards(statusPayload.pollers);
     latestValues.innerHTML = statusPayload.latest_samples
@@ -1354,7 +1241,7 @@ async function refresh() {
     }
 
     renderCumulativeStats(items, statusPayload.pollers);
-    renderBleSolarChart(items, historyItems);
+    renderBleSolarChart(items);
     renderCumulativeChart(items);
     renderEnergyBreakdowns(items);
     refreshText.textContent = `Updated ${new Date().toLocaleTimeString("en-AU", { timeZone: appTimezone })}`;
