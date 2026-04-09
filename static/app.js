@@ -329,14 +329,32 @@ function getBydPowerWatts(item) {
   return null;
 }
 
+function getBydChargingRate(item) {
+  const payload = item && item.raw_payload ? item.raw_payload : {};
+  const candidates = [
+    payload.ev_charging_rate_w_per_min,
+    item && item.grid_usage_watts,
+    payload.tracked_power_w !== null && payload.tracked_power_w !== undefined ? Number(payload.tracked_power_w) / 60 : null,
+    payload.power_w !== null && payload.power_w !== undefined ? Math.max(0, Number(payload.power_w)) / 60 : null
+  ];
+
+  for (const candidate of candidates) {
+    if (candidate !== null && candidate !== undefined && !Number.isNaN(Number(candidate))) {
+      return Math.max(0, Number(candidate));
+    }
+  }
+  return null;
+}
+
 function getBydPowerSeries(items) {
   return items
     .filter((item) => item.source === "byd_ev")
     .map((item) => ({
       ...item,
-      power_w: getBydPowerWatts(item)
+      power_w: getBydPowerWatts(item),
+      charging_rate_w_per_min: getBydChargingRate(item)
     }))
-    .filter((item) => item.power_w !== null)
+    .filter((item) => item.charging_rate_w_per_min !== null)
     .sort((left, right) => new Date(left.observed_at) - new Date(right.observed_at));
 }
 
@@ -548,7 +566,7 @@ function formatMetricCard(item) {
   const isImputed = item.raw_payload && item.raw_payload.imputed;
   if (item.source === "byd_ev") {
     const payload = item.raw_payload || {};
-    const powerWatts = getBydPowerWatts(item);
+    const chargingRate = getBydChargingRate(item);
     const etaMinutes = payload.time_to_full_minutes;
     const etaText = etaMinutes === null || etaMinutes === undefined
       ? "n/a"
@@ -556,11 +574,7 @@ function formatMetricCard(item) {
     return `
       <article class="metric-card">
         <span>byd_ev</span>
-        <div class="metric-reading">
-          <span class="metric-reading-label">BYD EV</span>
-          <strong class="metric-reading-main">${powerWatts === null ? "n/a" : `${wattsToKw(powerWatts).toFixed(3)} kW`}</strong>
-          <small class="metric-reading-sub">${formatWatts(powerWatts)}</small>
-        </div>
+        ${formatMetricReading("BYD EV", chargingRate)}
         <small>SoC: ${payload.soc_percent === null || payload.soc_percent === undefined ? "n/a" : `${Number(payload.soc_percent).toFixed(0)}%`}</small>
         <small>Range: ${payload.range_km === null || payload.range_km === undefined ? "n/a" : `${Number(payload.range_km).toFixed(0)} km`}</small>
         <small>Charge ETA: ${etaText}</small>
@@ -849,7 +863,7 @@ function getTodayAndWeekTotals(items) {
   );
   const evDailyTotals = buildEnergyTotals(
     bydItems,
-    "power_w",
+    "charging_rate_w_per_min",
     getDayKey,
     getStartOfNextDay
   );
@@ -867,7 +881,7 @@ function getTodayAndWeekTotals(items) {
   );
   const evWeeklyTotals = buildEnergyTotals(
     bydItems,
-    "power_w",
+    "charging_rate_w_per_min",
     getWeekKey,
     getStartOfNextWeek
   );
@@ -885,7 +899,7 @@ function getTodayAndWeekTotals(items) {
   );
   const evMonthlyTotals = buildEnergyTotals(
     bydItems,
-    "power_w",
+    "charging_rate_w_per_min",
     getMonthKey,
     getStartOfNextMonth
   );
@@ -1015,13 +1029,13 @@ function renderEnergyBreakdowns(items) {
 
   const solarHourBars = buildSortedBars(buildEnergyTotals(solarItems, "solar_generation_watts", getHourKey, getStartOfNextDay));
   const gridHourBars = buildSortedBars(buildEnergyTotals(bleGridItems, "grid_usage_watts", getHourKey, getStartOfNextDay));
-  const bydHourBars = buildSortedBars(buildEnergyTotals(bydItems, "power_w", getHourKey, getStartOfNextDay));
+  const bydHourBars = buildSortedBars(buildEnergyTotals(bydItems, "charging_rate_w_per_min", getHourKey, getStartOfNextDay));
   const solarWeekBars = buildSortedBars(buildEnergyTotals(solarItems, "solar_generation_watts", getWeekKey, getStartOfNextWeek));
   const gridWeekBars = buildSortedBars(buildEnergyTotals(bleGridItems, "grid_usage_watts", getWeekKey, getStartOfNextWeek));
-  const bydWeekBars = buildSortedBars(buildEnergyTotals(bydItems, "power_w", getWeekKey, getStartOfNextWeek));
+  const bydWeekBars = buildSortedBars(buildEnergyTotals(bydItems, "charging_rate_w_per_min", getWeekKey, getStartOfNextWeek));
   const solarMonthBars = buildSortedBars(buildEnergyTotals(solarItems, "solar_generation_watts", getMonthKey, getStartOfNextMonth));
   const gridMonthBars = buildSortedBars(buildEnergyTotals(bleGridItems, "grid_usage_watts", getMonthKey, getStartOfNextMonth));
-  const bydMonthBars = buildSortedBars(buildEnergyTotals(bydItems, "power_w", getMonthKey, getStartOfNextMonth));
+  const bydMonthBars = buildSortedBars(buildEnergyTotals(bydItems, "charging_rate_w_per_min", getMonthKey, getStartOfNextMonth));
 
   function combineBars(solarBars, gridBars, evBars) {
     const map = new Map();
@@ -1170,16 +1184,16 @@ function renderBleSolarChart(items) {
     },
     {
       x: evItems.map((item) => toChartTime(item.observed_at)),
-      y: evItems.map((item) => wattsToKw(item.power_w)),
-      customdata: evItems.map((item) => Number(item.power_w)),
+      y: evItems.map((item) => ratePerMinuteToKwPerHour(item.charging_rate_w_per_min)),
+      customdata: evItems.map((item) => Number(item.charging_rate_w_per_min)),
       mode: "lines",
       name: "BYD EV",
       line: { color: dark ? "#ffb45b" : "#d6882e", width: 1.6, shape: "linear" },
-      hovertemplate: buildPowerHoverTemplate("BYD EV")
+      hovertemplate: buildRateHoverTemplate("BYD EV")
     },
     {
       x: evItems.map((item) => toChartTime(item.observed_at)),
-      y: evItems.map((item) => Number(item.power_w)),
+      y: evItems.map((item) => Number(item.charging_rate_w_per_min)),
       yaxis: "y2",
       mode: "lines",
       name: "BYD EV raw",
@@ -1238,7 +1252,7 @@ function renderCumulativeChart(items) {
 
   const solarKwh = integrateSeriesKwh(solarItems, "solar_generation_watts");
   const gridKwh = integrateSeriesKwh(bleGridItems, "grid_usage_watts");
-  const evKwh = integrateSeriesKwh(evItems, "power_w");
+  const evKwh = integrateSeriesKwh(evItems, "charging_rate_w_per_min");
   const xValues = [
     ...solarKwh.map((item) => toChartTime(item.observed_at)),
     ...gridKwh.map((item) => toChartTime(item.observed_at)),
