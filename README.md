@@ -137,9 +137,60 @@ The browser UI will then be available at [http://raspberrypi.local:8001](http://
 
 If `pip install -r requirements.txt` hangs or spends a long time building `uvloop` on the Raspberry Pi, use the plain `uvicorn` dependency in this repo. The app does not need `uvicorn[standard]` for the Pi service setup.
 
+## Enable HTTPS with Caddy
+
+If you want Chrome on Android to offer app install, serve the dashboard over HTTPS with a real domain name.
+
+1. Point a DNS name at your server, for example `solar.example.com`.
+2. Keep the app running locally on `127.0.0.1:8001` via the included `solar-monitor.service`.
+3. Install Caddy:
+
+```bash
+sudo apt update
+sudo apt install -y debian-keyring debian-archive-keyring apt-transport-https curl
+curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | sudo gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | sudo tee /etc/apt/sources.list.d/caddy-stable.list
+sudo apt update
+sudo apt install -y caddy
+```
+
+4. Copy the example reverse-proxy config and replace the hostname:
+
+```bash
+sudo cp /opt/solar-monitor/deploy/Caddyfile /etc/caddy/Caddyfile
+sudo nano /etc/caddy/Caddyfile
+```
+
+Set it to:
+
+```caddyfile
+solar.example.com {
+  encode gzip zstd
+  reverse_proxy 127.0.0.1:8001
+}
+```
+
+5. Open the firewall for web traffic if needed:
+
+```bash
+sudo ufw allow 80/tcp
+sudo ufw allow 443/tcp
+```
+
+6. Start Caddy:
+
+```bash
+sudo systemctl restart caddy
+sudo systemctl enable caddy
+sudo systemctl status caddy
+```
+
+Once DNS is correct, Caddy will obtain and renew the TLS certificate automatically. Your dashboard should then be available at `https://solar.example.com`.
+
 ## Service notes
 
 - The included unit file is [deploy/solar-monitor.service](/Users/sekkevin/LocalR/solar/deploy/solar-monitor.service).
+- An example HTTPS reverse-proxy config is [deploy/Caddyfile](/Users/sekkevin/LocalR/solar/solar/deploy/Caddyfile).
 - It assumes the app is deployed to `/opt/solar-monitor` and runs as user `sek0002` with group `root`.
 - BLE works much more naturally on bare metal Linux than in Docker, which is why this deployment mode is the better fit for a Raspberry Pi.
 - If your Pi uses a different account mapping, update `User=` and `Group=` in the service file before copying it into `/etc/systemd/system/`.
