@@ -147,7 +147,7 @@ body {
 .topbar {
   grid-template-columns: 1fr auto;
   align-items: center;
-  gap: 10px;
+  gap: 4px;
   margin-bottom: 20px;
 }
 
@@ -189,11 +189,12 @@ body {
 }
 
 .topbar-gauge-ble-ring {
-  inset: 3px;
+  inset: 18px;
+  z-index: 2;
   background:
-    conic-gradient(from -90deg, #6cbcff 0turn var(--ble-progress), rgba(92, 128, 168, 0.2) var(--ble-progress) 1turn);
-  -webkit-mask: radial-gradient(circle at center, transparent 0 76px, #000 76px 83px, transparent 83px 100%);
-  mask: radial-gradient(circle at center, transparent 0 76px, #000 76px 83px, transparent 83px 100%);
+    conic-gradient(from -90deg, rgba(108, 188, 255, 0.98) 0turn var(--ble-progress), transparent var(--ble-progress) 1turn);
+  -webkit-mask: radial-gradient(circle at center, transparent 0 61px, #000 61px 65px, transparent 65px 100%);
+  mask: radial-gradient(circle at center, transparent 0 61px, #000 61px 65px, transparent 65px 100%);
 }
 
 .topbar-gauge-solar-ring {
@@ -206,6 +207,7 @@ body {
 
 .topbar-gauge-inner-ticks {
   inset: 18px;
+  z-index: 1;
   background:
     repeating-conic-gradient(from -90deg, rgba(245, 247, 250, 0.82) 0deg 1.2deg, transparent 1.2deg 18deg);
   -webkit-mask: radial-gradient(circle at center, transparent 0 61px, #000 61px 65px, transparent 65px 100%);
@@ -291,7 +293,7 @@ body {
   gap: 12px;
   align-items: center;
   flex-wrap: wrap;
-  row-gap: 6px;
+  row-gap: 2px;
   min-width: 0;
 }
 
