@@ -497,6 +497,12 @@ function captureChartState(element, chartKey) {
   });
 }
 
+function resetStoredChartState() {
+  updateUiState((state) => {
+    state.charts = {};
+  });
+}
+
 function formatMetricReading(label, value) {
   return `
     <div class="metric-reading">
@@ -1340,6 +1346,7 @@ hoursInput.addEventListener("change", () => {
 
 resetRangeButton.addEventListener("click", () => {
   applyDefaultStartDateTime(hoursInput.value || window.SOLAR_MONITOR_CONFIG.defaultHours || 24);
+  resetStoredChartState();
   scheduleRefresh(0);
 });
 
