@@ -339,6 +339,11 @@ input[type="range"] {
   margin-bottom: 20px;
 }
 
+.charts-grid-one {
+  grid-template-columns: minmax(0, 1fr);
+  margin-bottom: 20px;
+}
+
 .charts-grid-four {
   grid-template-columns: repeat(4, minmax(0, 1fr));
   margin-bottom: 20px;
@@ -497,8 +502,13 @@ input[type="range"] {
   grid-template-rows: auto 1fr;
 }
 
+.byd-status-panel {
+  margin-top: 0;
+}
+
 #byd-summary-frame {
   width: 100%;
+  min-height: 320px;
   border: 1px solid var(--line);
   border-radius: 16px;
   background: var(--panel);
