@@ -67,6 +67,18 @@ def _format_byd_page_value(value: object, suffix: str = "") -> str:
     return f"{value}{suffix}"
 
 
+def _format_eta_value(minutes: object) -> str:
+    if minutes is None or minutes == "":
+        return "-"
+    try:
+        total = int(float(minutes))
+    except (TypeError, ValueError):
+        return str(minutes)
+    hours = total // 60
+    remainder = total % 60
+    return f"{hours}h {remainder}m"
+
+
 def _read_byd_re_status_html() -> Optional[str]:
     status_path = Path(settings.byd_re_dir).expanduser() / "status.html"
     if not status_path.exists():
@@ -171,17 +183,13 @@ def _build_byd_page(
 
     if compact:
         cards = [
-            ("State", _format_byd_page_value(state)),
             ("SoC", _format_byd_page_value(pick("soc_percent"), "%")),
             ("Range", _format_byd_page_value(pick("range_km"), " km")),
-            ("Charging", _format_byd_page_value(pick("charging_state"))),
-            ("Connected", _format_byd_page_value(pick("is_connected"))),
             ("Power", _format_byd_page_value(pick("power_w"), " W")),
-            ("ETA", _format_byd_page_value(pick("time_to_full_minutes"), " min")),
+            ("Charge ETA", _format_eta_value(pick("time_to_full_minutes"))),
             ("Mileage", _format_byd_page_value(pick("total_mileage_km"), " km")),
             ("Model", _format_byd_page_value(pick("model_name"))),
             ("VIN", _format_byd_page_value(pick("vin"))),
-            ("Charging now", _format_byd_page_value(pick("is_charging"))),
             ("Last success", _format_byd_page_value(last_success)),
             ("Observed", _format_byd_page_value(observed_at)),
             ("Inside temp", _format_byd_page_value(pick("inside_temp_c"), " C")),
@@ -190,19 +198,15 @@ def _build_byd_page(
         ]
     else:
         cards = [
-            ("State", _format_byd_page_value(state)),
             ("VIN", _format_byd_page_value(pick("vin"))),
             ("Model", _format_byd_page_value(pick("model_name"))),
             ("SoC", _format_byd_page_value(pick("soc_percent"), "%")),
             ("Range", _format_byd_page_value(pick("range_km"), " km")),
-            ("Charging", _format_byd_page_value(pick("charging_state"))),
-            ("Connected", _format_byd_page_value(pick("is_connected"))),
-            ("Charging now", _format_byd_page_value(pick("is_charging"))),
             ("Power", _format_byd_page_value(pick("power_w"), " W")),
             ("Mileage", _format_byd_page_value(pick("total_mileage_km"), " km")),
             ("Inside temp", _format_byd_page_value(pick("inside_temp_c"), " C")),
             ("Outside temp", _format_byd_page_value(pick("outside_temp_c"), " C")),
-            ("ETA", _format_byd_page_value(pick("time_to_full_minutes"), " min")),
+            ("Charge ETA", _format_eta_value(pick("time_to_full_minutes"))),
             ("Observed at", _format_byd_page_value(observed_at)),
             ("Last success", _format_byd_page_value(last_success)),
         ]

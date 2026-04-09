@@ -548,9 +548,8 @@ function formatMetricCard(item) {
         ${formatMetricReading("BYD EV", item.grid_usage_watts)}
         <small>SoC: ${payload.soc_percent === null || payload.soc_percent === undefined ? "n/a" : `${Number(payload.soc_percent).toFixed(0)}%`}</small>
         <small>Range: ${payload.range_km === null || payload.range_km === undefined ? "n/a" : `${Number(payload.range_km).toFixed(0)} km`}</small>
-        <small>Charge state: ${payload.charging_state || "n/a"}</small>
-        <small>Connected: ${payload.is_connected ? "yes" : "no"}</small>
-        <small>ETA: ${etaText}</small>
+        <small>Charge ETA: ${etaText}</small>
+        <small>Power source: ${payload.power_source || "n/a"}</small>
         <small>Mileage: ${payload.total_mileage_km === null || payload.total_mileage_km === undefined ? "n/a" : `${Number(payload.total_mileage_km).toFixed(0)} km`}</small>
         <small>${formatDateTime(item.observed_at)}</small>
       </article>

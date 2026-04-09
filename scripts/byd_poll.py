@@ -26,6 +26,16 @@ def _as_float(value: Any) -> float | None:
         return None
 
 
+def _eta_text_from_minutes(total_minutes: Any) -> str | None:
+    minutes = _as_float(total_minutes)
+    if minutes is None:
+        return None
+    rounded = int(minutes)
+    hours = rounded // 60
+    remainder = rounded % 60
+    return f"{hours}h {remainder}m"
+
+
 def _extract_data_from_status_html(status_html: str) -> tuple[dict[str, Any], Any]:
     match = re.search(r"var data = (.*?);\s*var generatedAt = (.*?);", status_html, re.S)
     if not match:
@@ -105,7 +115,7 @@ def main() -> int:
     soc_percent = _pick_first(vehicle_info.get("elecPercent"), vehicle_info.get("powerBattery"))
     range_km = _pick_first(vehicle_info.get("enduranceMileage"), vehicle_info.get("evEndurance"))
     charge_state = _pick_first(vehicle_info.get("chargingState"), vehicle_info.get("chargeState"))
-    power_w = _pick_first(vehicle_info.get("totalPower"), vehicle_info.get("gl"))
+    power_w = _pick_first(vehicle_info.get("gl"), vehicle_info.get("totalPower"))
     power_w = _as_float(power_w)
 
     remaining_hours = _as_float(vehicle_info.get("remainingHours"))
@@ -126,8 +136,9 @@ def main() -> int:
         "is_charging": is_charging,
         "is_connected": is_connected,
         "time_to_full_minutes": time_to_full_minutes,
+        "time_to_full_text": _eta_text_from_minutes(time_to_full_minutes),
         "power_w": power_w,
-        "power_source": "totalPower" if vehicle_info.get("totalPower") not in (None, "") else ("gl" if vehicle_info.get("gl") not in (None, "") else None),
+        "power_source": "gl" if vehicle_info.get("gl") not in (None, "") else ("totalPower" if vehicle_info.get("totalPower") not in (None, "") else None),
         "charge_rate": _as_float(vehicle_info.get("chargeRate")),
         "total_mileage_km": _as_float(_pick_first(vehicle_info.get("totalMileageV2"), vehicle_info.get("totalMileage"))),
         "realtime_timestamp": vehicle_info.get("time"),
