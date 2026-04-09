@@ -292,47 +292,6 @@ function buildFutureTimeline() {
   return points;
 }
 
-function getRecentSlope(series, valueKey) {
-  const nowMs = Date.now();
-  const pastPoints = series
-    .filter((item) => new Date(item.observed_at).getTime() <= nowMs)
-    .slice(-4);
-
-  if (pastPoints.length < 2) {
-    return null;
-  }
-
-  const first = pastPoints[0];
-  const last = pastPoints[pastPoints.length - 1];
-  const deltaMinutes = (new Date(last.observed_at) - new Date(first.observed_at)) / 60000;
-  if (deltaMinutes <= 0) {
-    return null;
-  }
-
-  const startValue = Number(first[valueKey]);
-  const endValue = Number(last[valueKey]);
-  return {
-    lastObservedAt: new Date(last.observed_at),
-    lastValue: endValue,
-    slopePerMinute: (endValue - startValue) / deltaMinutes
-  };
-}
-
-function buildProjectionSeries(series, valueKey) {
-  const slope = getRecentSlope(series, valueKey);
-  if (!slope) {
-    return [];
-  }
-
-  return buildFutureTimeline().map((futureTime) => {
-    const deltaMinutes = (futureTime - slope.lastObservedAt) / 60000;
-    return {
-      observed_at: futureTime.toISOString(),
-      value: slope.lastValue + (slope.slopePerMinute * deltaMinutes)
-    };
-  });
-}
-
 function buildWeeklyMeanSeries(historySeries, valueKey) {
   if (!historySeries.length) {
     return [];
@@ -404,12 +363,25 @@ function buildNowLine(xValue) {
 function getBydPowerWatts(item) {
   const payload = item && item.raw_payload ? item.raw_payload : {};
   const realtime = payload && payload.realtime ? payload.realtime : {};
+  const vehicle = payload && payload.vehicle ? payload.vehicle : {};
   const nestedGl = realtime.gl;
-  if (payload.power_w !== null && payload.power_w !== undefined && !Number.isNaN(Number(payload.power_w))) {
-    return Number(payload.power_w);
-  }
-  if (nestedGl !== null && nestedGl !== undefined && !Number.isNaN(Number(nestedGl))) {
-    return Number(nestedGl);
+  const flatGl = payload.gl_w;
+  const flatTotalPower = payload.total_power_w;
+  const vehicleGl = vehicle.gl;
+  const vehicleTotalPower = vehicle.totalPower;
+  const candidates = [
+    payload.power_w,
+    flatGl,
+    flatTotalPower,
+    nestedGl,
+    vehicleGl,
+    vehicleTotalPower
+  ];
+
+  for (const candidate of candidates) {
+    if (candidate !== null && candidate !== undefined && !Number.isNaN(Number(candidate))) {
+      return Number(candidate);
+    }
   }
   if (item && item.grid_usage_watts !== null && item.grid_usage_watts !== undefined && !Number.isNaN(Number(item.grid_usage_watts))) {
     return Number(item.grid_usage_watts) * 60;
@@ -880,7 +852,6 @@ function buildRateChart(element, chartKey, title, items, valueKey, colors, histo
   const xValues = items.map((item) => toChartTime(item.observed_at));
   const yKw = items.map((item) => ratePerMinuteToKwPerHour(item[valueKey]));
   const yRate = items.map((item) => Number(item[valueKey]));
-  const projectedSeries = buildProjectionSeries(items, valueKey);
   const weeklyMeanSeries = buildWeeklyMeanSeries(historySeries, valueKey);
   const nowX = xValues.length ? toChartTime(new Date()) : null;
   const traces = [
@@ -904,15 +875,6 @@ function buildRateChart(element, chartKey, title, items, valueKey, colors, histo
       showlegend: false,
       hoverinfo: "skip",
       line: { color: "rgba(0,0,0,0)", width: 0 }
-    },
-    {
-      x: projectedSeries.map((item) => toChartTime(item.observed_at)),
-      y: projectedSeries.map((item) => ratePerMinuteToKwPerHour(item.value)),
-      customdata: projectedSeries.map((item) => Number(item.value)),
-      mode: "lines",
-      name: `${title} trend`,
-      line: { color: colors.line, width: 1.5, dash: "dot" },
-      hovertemplate: buildRateHoverTemplate(`${title} trend`)
     },
     {
       x: weeklyMeanSeries.filter((item) => item.value !== null).map((item) => toChartTime(item.observed_at)),
@@ -978,11 +940,8 @@ function renderBleSolarChart(items, historyItems) {
     .sort((left, right) => new Date(left.observed_at) - new Date(right.observed_at));
   const evItems = getBydPowerSeries(items);
   const evHistoryItems = getBydPowerSeries(historyItems);
-  const bleProjection = buildProjectionSeries(bleGrid, "grid_usage_watts");
   const bleWeeklyMean = buildWeeklyMeanSeries(bleGridHistory, "grid_usage_watts").filter((item) => item.value !== null);
-  const solarProjection = buildProjectionSeries(siteSolar, "solar_generation_watts");
   const solarWeeklyMean = buildWeeklyMeanSeries(siteSolarHistory, "solar_generation_watts").filter((item) => item.value !== null);
-  const evProjection = buildProjectionSeries(evItems, "power_w");
   const evWeeklyMean = buildWeeklyMeanSeries(evHistoryItems, "power_w").filter((item) => item.value !== null);
 
   const chartTheme = buildChartTheme();
@@ -1008,15 +967,6 @@ function renderBleSolarChart(items, historyItems) {
       showlegend: false,
       hoverinfo: "skip",
       line: { color: "rgba(0,0,0,0)", width: 0 }
-    },
-    {
-      x: bleProjection.map((item) => toChartTime(item.observed_at)),
-      y: bleProjection.map((item) => ratePerMinuteToKwPerHour(item.value)),
-      customdata: bleProjection.map((item) => Number(item.value)),
-      mode: "lines",
-      name: "BLE grid trend",
-      line: { color: dark ? "#7fb0ff" : "#6f96d8", width: 1.5, dash: "dot" },
-      hovertemplate: buildRateHoverTemplate("BLE grid trend")
     },
     {
       x: bleWeeklyMean.map((item) => toChartTime(item.observed_at)),
@@ -1050,15 +1000,6 @@ function renderBleSolarChart(items, historyItems) {
       line: { color: "rgba(0,0,0,0)", width: 0 }
     },
     {
-      x: solarProjection.map((item) => toChartTime(item.observed_at)),
-      y: solarProjection.map((item) => ratePerMinuteToKwPerHour(item.value)),
-      customdata: solarProjection.map((item) => Number(item.value)),
-      mode: "lines",
-      name: "Site solar trend",
-      line: { color: dark ? "#8ee29d" : "#7cc98a", width: 1.5, dash: "dot" },
-      hovertemplate: buildRateHoverTemplate("Site solar trend")
-    },
-    {
       x: solarWeeklyMean.map((item) => toChartTime(item.observed_at)),
       y: solarWeeklyMean.map((item) => ratePerMinuteToKwPerHour(item.value)),
       customdata: solarWeeklyMean.map((item) => Number(item.value)),
@@ -1086,15 +1027,6 @@ function renderBleSolarChart(items, historyItems) {
       showlegend: false,
       hoverinfo: "skip",
       line: { color: "rgba(0,0,0,0)", width: 0 }
-    },
-    {
-      x: evProjection.map((item) => toChartTime(item.observed_at)),
-      y: evProjection.map((item) => wattsToKw(item.value)),
-      customdata: evProjection.map((item) => Number(item.value)),
-      mode: "lines",
-      name: "BYD EV trend",
-      line: { color: dark ? "#ffb45b" : "#d6882e", width: 1.5, dash: "dot" },
-      hovertemplate: buildPowerHoverTemplate("BYD EV trend")
     },
     {
       x: evWeeklyMean.map((item) => toChartTime(item.observed_at)),

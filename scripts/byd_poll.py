@@ -115,8 +115,11 @@ def main() -> int:
     soc_percent = _pick_first(vehicle_info.get("elecPercent"), vehicle_info.get("powerBattery"))
     range_km = _pick_first(vehicle_info.get("enduranceMileage"), vehicle_info.get("evEndurance"))
     charge_state = _pick_first(vehicle_info.get("chargingState"), vehicle_info.get("chargeState"))
-    power_w = _pick_first(vehicle_info.get("gl"), vehicle_info.get("totalPower"))
-    power_w = _as_float(power_w)
+    gl_w = _as_float(_pick_first(vehicle_info.get("gl"), data.get("gl"), (vehicle or {}).get("gl")))
+    total_power_w = _as_float(
+        _pick_first(vehicle_info.get("totalPower"), data.get("totalPower"), (vehicle or {}).get("totalPower"))
+    )
+    power_w = _pick_first(gl_w, total_power_w)
 
     remaining_hours = _as_float(vehicle_info.get("remainingHours"))
     remaining_minutes = _as_float(vehicle_info.get("remainingMinutes"))
@@ -138,7 +141,9 @@ def main() -> int:
         "time_to_full_minutes": time_to_full_minutes,
         "time_to_full_text": _eta_text_from_minutes(time_to_full_minutes),
         "power_w": power_w,
-        "power_source": "gl" if vehicle_info.get("gl") not in (None, "") else ("totalPower" if vehicle_info.get("totalPower") not in (None, "") else None),
+        "gl_w": gl_w,
+        "total_power_w": total_power_w,
+        "power_source": "gl" if gl_w is not None else ("totalPower" if total_power_w is not None else None),
         "charge_rate": _as_float(vehicle_info.get("chargeRate")),
         "total_mileage_km": _as_float(_pick_first(vehicle_info.get("totalMileageV2"), vehicle_info.get("totalMileage"))),
         "realtime_timestamp": vehicle_info.get("time"),
