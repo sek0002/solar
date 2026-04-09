@@ -802,9 +802,18 @@ function aggregateEnergyByBucket(segments, keyBuilder) {
 }
 
 function getBleBatteryPercent(pollers) {
-  const blePoller = (pollers || []).find((item) => item.name === "ble");
-  const batteryPercent = blePoller && blePoller.details ? blePoller.details.battery_percent : null;
-  return Number.isFinite(Number(batteryPercent)) ? Number(batteryPercent) : null;
+  const blePollers = (pollers || []).filter((item) => item && ["ble", "network_ble"].includes(item.name));
+  const preferredPoller = blePollers.find((item) => item.state === "connected")
+    || blePollers.find((item) => item.state === "starting")
+    || blePollers.find((item) => item.name === "ble")
+    || blePollers[0];
+
+  const batteryPercent = preferredPoller && preferredPoller.details ? preferredPoller.details.battery_percent : null;
+  const numericBatteryPercent = Number(batteryPercent);
+  if (!Number.isFinite(numericBatteryPercent)) {
+    return null;
+  }
+  return Math.max(0, Math.min(100, numericBatteryPercent));
 }
 
 function renderBleBatteryState(pollers) {
