@@ -1497,5 +1497,13 @@ resetRangeButton.addEventListener("click", () => {
 });
 
 window.addEventListener("resize", resizeCharts);
+if ("serviceWorker" in navigator) {
+  const swUrl = window.SOLAR_PWA && window.SOLAR_PWA.swUrl ? window.SOLAR_PWA.swUrl : "/sw.js";
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register(swUrl).catch((error) => {
+      console.warn("Service worker registration failed", error);
+    });
+  });
+}
 refresh();
 setInterval(refresh, 30000);

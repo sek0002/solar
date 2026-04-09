@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import FastAPI, Header, HTTPException, Query, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -466,6 +466,23 @@ app = FastAPI(title=settings.app_title, lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
 
 
+@app.get("/manifest.webmanifest")
+async def manifest() -> FileResponse:
+    return FileResponse(
+        BASE_DIR / "static" / "manifest.webmanifest",
+        media_type="application/manifest+json",
+    )
+
+
+@app.get("/sw.js")
+async def service_worker() -> FileResponse:
+    return FileResponse(
+        BASE_DIR / "static" / "sw.js",
+        media_type="application/javascript",
+        headers={"Service-Worker-Allowed": "/"},
+    )
+
+
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request) -> HTMLResponse:
     latest_samples = database.get_latest_samples()
@@ -479,6 +496,9 @@ async def index(request: Request) -> HTMLResponse:
             "default_hours": settings.api_default_hours,
             "timezone_name": settings.timezone_name,
             "static_app_version": _static_asset_version("static/app.js"),
+            "manifest_version": _static_asset_version("static/manifest.webmanifest"),
+            "styles_version": _static_asset_version("static/styles.css"),
+            "sw_version": _static_asset_version("static/sw.js"),
             "latest_samples": latest_samples,
             "statuses": statuses,
         },
