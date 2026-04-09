@@ -136,6 +136,14 @@ body {
   transition: width 0.24s ease;
 }
 
+.ble-battery-fill {
+  width: 0%;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #ff8e8e 0%, #f6c85f 45%, #7fb0ff 100%);
+  transition: width 0.24s ease;
+}
+
 .controls-inline {
   display: flex;
   gap: 12px;

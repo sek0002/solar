@@ -8,6 +8,7 @@ const latestValues = document.querySelector("#latest-values");
 const totalsTableBody = document.querySelector("#totals-table-body");
 const refreshText = document.querySelector("#last-refresh");
 const batteryText = document.querySelector("#powerpal-battery");
+const bleBatteryFill = document.querySelector("#ble-battery-fill");
 const evBatteryFill = document.querySelector("#ev-battery-fill");
 const evBatteryLabel = document.querySelector("#ev-battery-label");
 const themeToggle = document.querySelector("#theme-toggle");
@@ -688,6 +689,14 @@ function getBleBatteryPercent(pollers) {
   return Number.isFinite(Number(batteryPercent)) ? Number(batteryPercent) : null;
 }
 
+function renderBleBatteryState(pollers) {
+  const batteryPercent = getBleBatteryPercent(pollers);
+  if (bleBatteryFill) {
+    bleBatteryFill.style.width = batteryPercent === null ? "0%" : `${batteryPercent}%`;
+  }
+  batteryText.textContent = batteryPercent === null ? "Battery n/a" : `Battery ${batteryPercent}%`;
+}
+
 function getBydSocPercent(samples, pollers) {
   const bydSample = (samples || []).find((item) => item.source === "byd_ev");
   const samplePayload = bydSample && bydSample.raw_payload ? bydSample.raw_payload : {};
@@ -1242,8 +1251,7 @@ async function refresh() {
       .filter((item) => item.source !== "tuya_ev")
       .map(formatMetricCard)
       .join("");
-    const batteryPercent = getBleBatteryPercent(statusPayload.pollers);
-    batteryText.textContent = batteryPercent === null ? "Battery n/a" : `Battery ${batteryPercent}%`;
+    renderBleBatteryState(statusPayload.pollers);
     renderEvBatteryState(statusPayload.latest_samples, statusPayload.pollers);
 
     if (!items.length) {
@@ -1266,7 +1274,7 @@ async function refresh() {
     console.error("Refresh failed", error);
     renderEmptyCharts();
     refreshText.textContent = "Refresh failed";
-    batteryText.textContent = "Battery n/a";
+    renderBleBatteryState([]);
     renderEvBatteryState([], []);
   }
 }
