@@ -200,7 +200,7 @@ function formatGaugeKwPerHour(value) {
   if (value === null || value === undefined || Number.isNaN(Number(value))) {
     return "n/a";
   }
-  return `${ratePerMinuteToKwPerHour(value).toFixed(2)} kW/hr`;
+  return ratePerMinuteToKwPerHour(value).toFixed(2);
 }
 
 function ratePerMinuteToKwh(ratePerMinute, deltaMinutes) {
