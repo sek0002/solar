@@ -253,13 +253,10 @@ function getLatestRateBySource(samples, source, valueKey) {
 function renderTopbarGauge(samples) {
   const solarRate = getLatestRateBySource(samples, "local_site", "solar_generation_watts");
   const bleRate = getLatestRateBySource(samples, "ble", "grid_usage_watts");
-  const solarProgress = clamp((solarRate === null ? 0 : ratePerMinuteToKwPerHour(solarRate) / 5), 0, 1);
-  const bleProgress = clamp((bleRate === null ? 0 : ratePerMinuteToKwPerHour(bleRate) / 10), 0, 1);
 
   if (topbarGauge) {
-    topbarGauge.style.setProperty("--solar-progress", `${solarProgress}turn`);
-    topbarGauge.style.setProperty("--ble-progress", `${bleProgress}turn`);
-    topbarGauge.style.setProperty("--solar-fill", getInfernoSolarColor(solarRate, 5));
+    topbarGauge.style.setProperty("--core-fill", getInfernoSolarColor(bleRate, 10));
+    topbarGauge.style.setProperty("--inner-ring-stroke", "rgba(240, 244, 255, 0.1)");
   }
   if (topbarSolarValue) {
     topbarSolarValue.textContent = formatGaugeKwPerHour(solarRate);
@@ -274,13 +271,11 @@ function renderBydTopbarGauge(samples, pollers) {
   const glWatts = bydSample ? getBydPowerWatts(bydSample) : null;
   const glRate = glWatts === null ? null : glWatts / 60;
   const socPercent = getBydSocPercent(samples, pollers);
-  const glProgress = clamp((glRate === null ? 0 : ratePerMinuteToKwPerHour(glRate) / 3), 0, 1);
-  const socProgress = clamp((socPercent === null ? 0 : socPercent / 100), 0, 1);
+  const socRateEquivalent = socPercent === null ? null : (socPercent / 100) * (3 * 1000 / 60);
 
   if (topbarBydGauge) {
-    topbarBydGauge.style.setProperty("--solar-progress", `${glProgress}turn`);
-    topbarBydGauge.style.setProperty("--ble-progress", `${socProgress}turn`);
-    topbarBydGauge.style.setProperty("--solar-fill", getInfernoSolarColor(glRate, 3));
+    topbarBydGauge.style.setProperty("--core-fill", getInfernoSolarColor(socRateEquivalent, 3));
+    topbarBydGauge.style.setProperty("--inner-ring-stroke", "rgba(255, 214, 181, 0.09)");
   }
   if (topbarBydValue) {
     topbarBydValue.textContent = formatGaugeKwPerHour(glRate);
