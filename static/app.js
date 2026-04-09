@@ -8,6 +8,8 @@ const latestValues = document.querySelector("#latest-values");
 const totalsTableBody = document.querySelector("#totals-table-body");
 const refreshText = document.querySelector("#last-refresh");
 const batteryText = document.querySelector("#powerpal-battery");
+const evBatteryFill = document.querySelector("#ev-battery-fill");
+const evBatteryLabel = document.querySelector("#ev-battery-label");
 const themeToggle = document.querySelector("#theme-toggle");
 const bleChartElement = document.querySelector("#ble-chart");
 const cumulativeChartElement = document.querySelector("#cumulative-chart");
@@ -686,6 +688,26 @@ function getBleBatteryPercent(pollers) {
   return Number.isFinite(Number(batteryPercent)) ? Number(batteryPercent) : null;
 }
 
+function getBydSocPercent(samples, pollers) {
+  const bydSample = (samples || []).find((item) => item.source === "byd_ev");
+  const samplePayload = bydSample && bydSample.raw_payload ? bydSample.raw_payload : {};
+  const bydPoller = (pollers || []).find((item) => item.name === "byd_ev");
+  const pollerDetails = bydPoller && bydPoller.details ? bydPoller.details : {};
+  const candidate = samplePayload.soc_percent ?? pollerDetails.soc_percent;
+  const numeric = Number(candidate);
+  return Number.isFinite(numeric) ? Math.max(0, Math.min(100, numeric)) : null;
+}
+
+function renderEvBatteryState(samples, pollers) {
+  const socPercent = getBydSocPercent(samples, pollers);
+  if (evBatteryFill) {
+    evBatteryFill.style.width = socPercent === null ? "0%" : `${socPercent}%`;
+  }
+  if (evBatteryLabel) {
+    evBatteryLabel.textContent = socPercent === null ? "EV SoC n/a" : `EV SoC ${socPercent.toFixed(0)}%`;
+  }
+}
+
 function getTodayAndWeekTotals(items) {
   const now = new Date();
   const todayKey = getDayKey(now);
@@ -1222,6 +1244,7 @@ async function refresh() {
       .join("");
     const batteryPercent = getBleBatteryPercent(statusPayload.pollers);
     batteryText.textContent = batteryPercent === null ? "Battery n/a" : `Battery ${batteryPercent}%`;
+    renderEvBatteryState(statusPayload.latest_samples, statusPayload.pollers);
 
     if (!items.length) {
       totalsTableBody.innerHTML = `
@@ -1244,6 +1267,7 @@ async function refresh() {
     renderEmptyCharts();
     refreshText.textContent = "Refresh failed";
     batteryText.textContent = "Battery n/a";
+    renderEvBatteryState([], []);
   }
 }
 

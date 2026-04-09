@@ -112,6 +112,30 @@ body {
   justify-content: flex-end;
 }
 
+.battery-inline {
+  display: grid;
+  gap: 4px;
+  justify-items: end;
+  min-width: 120px;
+}
+
+.ev-battery-meter {
+  width: 120px;
+  height: 6px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--line) 85%, transparent);
+  border: 1px solid color-mix(in srgb, var(--line) 92%, transparent);
+}
+
+.ev-battery-fill {
+  width: 0%;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #f08a5d 0%, #f6c85f 45%, #7fd38a 100%);
+  transition: width 0.24s ease;
+}
+
 .controls-inline {
   display: flex;
   gap: 12px;

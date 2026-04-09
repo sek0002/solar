@@ -51,7 +51,13 @@
       </div>
       <div class="status-inline">
         <span id="last-refresh" class="last-refresh">Loading...</span>
-        <span id="powerpal-battery" class="last-refresh">Battery n/a</span>
+        <div class="battery-inline">
+          <span id="powerpal-battery" class="last-refresh">Battery n/a</span>
+          <div class="ev-battery-meter" aria-label="EV battery state of charge">
+            <div id="ev-battery-fill" class="ev-battery-fill"></div>
+          </div>
+          <span id="ev-battery-label" class="last-refresh">EV SoC n/a</span>
+        </div>
       </div>
     </section>
 
