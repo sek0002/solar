@@ -1,14 +1,14 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
-  <rect width="512" height="512" rx="120" fill="#0A1220"/>
-  <circle cx="256" cy="256" r="76" fill="#FFB45B"/>
-  <g stroke="#FFB45B" stroke-linecap="round" stroke-width="24">
-    <path d="M256 94v54"/>
-    <path d="M256 364v54"/>
-    <path d="M418 256h-54"/>
-    <path d="M148 256H94"/>
-    <path d="M370.55 141.45l-38.18 38.18"/>
-    <path d="M179.63 332.37l-38.18 38.18"/>
-    <path d="M370.55 370.55l-38.18-38.18"/>
-    <path d="M179.63 179.63l-38.18-38.18"/>
+  <rect width="512" height="512" rx="120" fill="#000000"/>
+  <circle cx="256" cy="256" r="78" fill="#C7CDD6"/>
+  <g fill="#C7CDD6">
+    <path d="M256 72l24 68h-48l24-68Z"/>
+    <path d="M440 256l-68 24v-48l68 24Z"/>
+    <path d="M256 440l-24-68h48l-24 68Z"/>
+    <path d="M72 256l68-24v48l-68-24Z"/>
+    <path d="M386.11 125.89l-16.97 70.06-33.94-33.94 50.91-36.12Z"/>
+    <path d="M386.11 386.11l-50.91-36.12 33.94-33.94 16.97 70.06Z"/>
+    <path d="M125.89 386.11l36.12-50.91 33.94 33.94-70.06 16.97Z"/>
+    <path d="M125.89 125.89l70.06 16.97-33.94 33.94-36.12-50.91Z"/>
   </g>
 </svg>
