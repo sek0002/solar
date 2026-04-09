@@ -2,12 +2,11 @@ from __future__ import annotations
 
 import html
 import logging
+import re
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
-from urllib.parse import urlencode
-from zoneinfo import ZoneInfo
 
 from fastapi import FastAPI, Header, HTTPException, Query, Request
 from fastapi.responses import FileResponse, HTMLResponse
@@ -88,109 +87,92 @@ def _format_eta_value(minutes: object) -> str:
     return f"{hours}h {remainder}m"
 
 
-def _extract_gps_coordinates(payload: object) -> tuple[float | None, float | None]:
-    if not isinstance(payload, dict):
-        return None, None
-
-    lat_keys = ("latitude", "lat", "gpsLat", "gpsLatitude")
-    lon_keys = ("longitude", "lon", "lng", "gpsLng", "gpsLongitude")
-
-    def _as_float(value: object) -> float | None:
-        try:
-            return float(value) if value not in (None, "") else None
-        except (TypeError, ValueError):
-            return None
-
-    latitude = next((_as_float(payload.get(key)) for key in lat_keys if _as_float(payload.get(key)) is not None), None)
-    longitude = next((_as_float(payload.get(key)) for key in lon_keys if _as_float(payload.get(key)) is not None), None)
-    if latitude is not None and longitude is not None:
-        return latitude, longitude
-
-    for value in payload.values():
-        nested_latitude, nested_longitude = _extract_gps_coordinates(value)
-        if nested_latitude is not None and nested_longitude is not None:
-            return nested_latitude, nested_longitude
-
-    return None, None
-
-
-def _build_map_embed_url(latitude: float | None, longitude: float | None) -> str | None:
-    if latitude is None or longitude is None:
+def _read_byd_re_status_html() -> Optional[str]:
+    status_path = Path(settings.byd_re_dir).expanduser() / "status.html"
+    if not status_path.exists():
         return None
-    delta = 0.015
-    params = urlencode(
-        {
-            "bbox": f"{longitude - delta:.6f},{latitude - delta:.6f},{longitude + delta:.6f},{latitude + delta:.6f}",
-            "layer": "mapnik",
-            "marker": f"{latitude:.6f},{longitude:.6f}",
-        }
-    )
-    return f"https://www.openstreetmap.org/export/embed.html?{params}"
+    try:
+        return status_path.read_text(encoding="utf-8")
+    except OSError:
+        return None
 
 
-def _split_energy_across_hours(
-    start: datetime,
-    end: datetime,
-    average_power_w: float,
-    timezone_name: str,
-) -> list[tuple[datetime, float]]:
-    if end <= start:
-        return []
-
-    tz = ZoneInfo(timezone_name)
-    current = start.astimezone(tz)
-    finish = end.astimezone(tz)
-    segments: list[tuple[datetime, float]] = []
-
-    while current < finish:
-        next_boundary = (current.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1))
-        segment_end = min(finish, next_boundary)
-        duration_hours = (segment_end - current).total_seconds() / 3600.0
-        if duration_hours > 0:
-            segments.append((current.replace(minute=0, second=0, microsecond=0), (average_power_w * duration_hours) / 1000.0))
-        current = segment_end
-
-    return segments
-
-
-def _build_byd_daily_bar_state(samples: list[dict[str, object]], timezone_name: str) -> tuple[list[tuple[str, float]], float]:
-    if len(samples) < 2:
-        return [], 0.0
-
-    hourly_totals: dict[datetime, float] = {}
-    for previous, current in zip(samples, samples[1:]):
-        try:
-            previous_at = datetime.fromisoformat(str(previous["observed_at"]).replace("Z", "+00:00"))
-            current_at = datetime.fromisoformat(str(current["observed_at"]).replace("Z", "+00:00"))
-        except (KeyError, TypeError, ValueError):
-            continue
-
-        previous_payload = previous.get("raw_payload") if isinstance(previous, dict) else {}
-        current_payload = current.get("raw_payload") if isinstance(current, dict) else {}
-        previous_power = (
-            (previous_payload or {}).get("tracked_power_w")
-            or (previous_payload or {}).get("gl_w")
-            or 0.0
-        )
-        current_power = (
-            (current_payload or {}).get("tracked_power_w")
-            or (current_payload or {}).get("gl_w")
-            or 0.0
-        )
-        try:
-            average_power_w = (float(previous_power) + float(current_power)) / 2.0
-        except (TypeError, ValueError):
-            continue
-
-        for bucket_start, energy_kwh in _split_energy_across_hours(previous_at, current_at, average_power_w, timezone_name):
-            hourly_totals[bucket_start] = hourly_totals.get(bucket_start, 0.0) + energy_kwh
-
-    cumulative = 0.0
-    bars: list[tuple[str, float]] = []
-    for bucket_start in sorted(hourly_totals):
-        cumulative += hourly_totals[bucket_start]
-        bars.append((bucket_start.strftime("%H:%M"), cumulative))
-    return bars, cumulative
+def _decorate_byd_re_status_html(status_html: str) -> str:
+    dark_style = """
+<style id="solar-byd-dark-override">
+  :root { color-scheme: dark; }
+  html, body {
+    background: #0f172a !important;
+    color: #e5e7eb !important;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif !important;
+  }
+  body {
+    margin: 0 !important;
+    padding: 24px 20px 36px !important;
+  }
+  .solar-byd-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin: 0 auto 20px;
+    max-width: 1200px;
+  }
+  .solar-byd-back {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 16px;
+    border-radius: 999px;
+    background: rgba(56, 189, 248, 0.16);
+    color: #e5e7eb !important;
+    text-decoration: none;
+    font-weight: 700;
+  }
+  .solar-byd-back:hover {
+    background: rgba(56, 189, 248, 0.26);
+  }
+  .solar-byd-title {
+    color: #94a3b8;
+    font-size: 0.9rem;
+  }
+  .container, main, .content, .wrapper {
+    max-width: 1200px;
+    margin-left: auto !important;
+    margin-right: auto !important;
+  }
+  img, svg, canvas {
+    max-width: 100% !important;
+    height: auto !important;
+  }
+  .card, .panel, table, section, article, .metric, .tile {
+    background: rgba(17, 24, 39, 0.88) !important;
+    color: #e5e7eb !important;
+    border-color: rgba(148, 163, 184, 0.18) !important;
+  }
+  h1, h2, h3, h4, h5, h6, strong, b, th, td, p, span, div, li, label {
+    color: inherit;
+  }
+  a { color: #38bdf8 !important; }
+</style>
+"""
+    toolbar = """
+<div class="solar-byd-toolbar">
+  <a class="solar-byd-back" href="/">Return to dashboard</a>
+  <div class="solar-byd-title">Live BYD-re status page</div>
+</div>
+"""
+    if "solar-byd-dark-override" in status_html:
+        return status_html
+    if "</head>" in status_html:
+        status_html = status_html.replace("</head>", f"{dark_style}</head>", 1)
+    else:
+        status_html = dark_style + status_html
+    if "<body" in status_html:
+        status_html = re.sub(r"(<body[^>]*>)", r"\1" + toolbar, status_html, count=1, flags=re.IGNORECASE)
+    else:
+        status_html = toolbar + status_html
+    return status_html
 
 
 def _build_byd_page(
@@ -210,117 +192,22 @@ def _build_byd_page(
     state = status.get("state") if status else "missing"
     last_error = status.get("last_error") if status else None
     last_success = status.get("last_success_at") if status else None
-    timezone_name = settings.timezone_name
-    now_local = datetime.now(ZoneInfo(timezone_name))
-    start_of_day_local = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
-    byd_day_samples = database.get_samples_range(
-        since=start_of_day_local.astimezone(timezone.utc),
-        until=now_local.astimezone(timezone.utc),
-        limit=settings.api_max_points,
-    )
-    byd_day_samples = [item for item in byd_day_samples if item.get("source") == "byd_ev"]
-    cumulative_bars, total_kwh = _build_byd_daily_bar_state(byd_day_samples, timezone_name)
-    max_bar_value = max((value for _, value in cumulative_bars), default=0.0)
-    latitude, longitude = _extract_gps_coordinates(raw_payload.get("gps") or {})
-    map_url = _build_map_embed_url(latitude, longitude)
-    current_gl_w = raw_payload.get("tracked_power_w", raw_payload.get("gl_w"))
-
-    bar_html = ""
-    if cumulative_bars:
-        bar_html = "".join(
-            """
-            <div class="daily-bar">
-              <div class="daily-bar-fill" style="height: {height:.2f}%"></div>
-              <span class="daily-bar-label">{label}</span>
-              <span class="daily-bar-value">{value:.2f} kWh</span>
-            </div>
-            """.format(
-                height=(value / max_bar_value * 100.0) if max_bar_value > 0 else 0.0,
-                label=html.escape(label),
-                value=value,
-            )
-            for label, value in cumulative_bars
-        )
-    else:
-        bar_html = '<div class="empty-state">Waiting for enough BYD samples to build today\'s cumulative bars.</div>'
-
-    if map_url:
-        map_html = """
-        <div class="map-shell">
-          <iframe
-            src="{map_url}"
-            title="BYD vehicle location"
-            loading="lazy"
-            referrerpolicy="no-referrer-when-downgrade"
-          ></iframe>
-        </div>
-        <div class="map-caption">GPS {latitude:.5f}, {longitude:.5f}</div>
-        """.format(map_url=html.escape(map_url, quote=True), latitude=latitude, longitude=longitude)
-    else:
-        map_html = '<div class="empty-state">GPS location is not available in the latest BYD payload yet.</div>'
-
-    overview_html = """
-    <section class="overview-card">
-      <div class="overview-heading">
-        <div>
-          <h2>Daily BYD net usage</h2>
-          <p>Cumulative total built from tracked non-negative `gl` power across today.</p>
-        </div>
-        <div class="overview-total">
-          <span>Total today</span>
-          <strong>{total_kwh:.2f} kWh</strong>
-          <small>Current gl {current_gl}</small>
-        </div>
-      </div>
-      <div class="daily-bars">
-        {bar_html}
-      </div>
-      <div class="overview-map">
-        <div class="overview-map-header">
-          <strong>Vehicle location</strong>
-          <span>{observed_at}</span>
-        </div>
-        {map_html}
-      </div>
-    </section>
-    """.format(
-        total_kwh=total_kwh,
-        current_gl=html.escape(_format_byd_page_value(current_gl_w, " W/hr")),
-        bar_html=bar_html,
-        observed_at=html.escape(_format_byd_page_value(observed_at)),
-        map_html=map_html,
-    )
-
-    compact_cards = [
-        ("State", _format_byd_page_value(state)),
-        ("SoC", _format_byd_page_value(pick("soc_percent"), "%")),
-        ("Range", _format_byd_page_value(pick("range_km"), " km")),
-        ("Current gl", _format_byd_page_value(current_gl_w, " W/hr")),
-        ("Power src", _format_byd_page_value(pick("power_source"))),
-        ("Charging", _format_byd_page_value(pick("is_charging"))),
-        ("Connected", _format_byd_page_value(pick("is_connected"))),
-        ("Charge state", _format_byd_page_value(pick("charging_state"))),
-        ("Charge ETA", _format_eta_value(pick("time_to_full_minutes"))),
-        ("Mileage", _format_byd_page_value(pick("total_mileage_km"), " km")),
-        ("Model", _format_byd_page_value(pick("model_name"))),
-        ("Brand", _format_byd_page_value(pick("brand_name"))),
-        ("VIN", _format_byd_page_value(pick("vin"))),
-        ("Vehicle", _format_byd_page_value(pick("vehicle_state"))),
-        ("Connect", _format_byd_page_value(pick("connect_state"))),
-        ("Online", _format_byd_page_value(pick("online_state"))),
-        ("Inside", _format_byd_page_value(pick("inside_temp_c"), " C")),
-        ("Outside", _format_byd_page_value(pick("outside_temp_c"), " C")),
-        ("GPS Lat", _format_byd_page_value(latitude)),
-        ("GPS Lon", _format_byd_page_value(longitude)),
-        ("Observed", _format_byd_page_value(observed_at)),
-        ("Last success", _format_byd_page_value(last_success)),
-        ("Realtime", _format_byd_page_value(pick("realtime_timestamp"))),
-        ("Charge upd", _format_byd_page_value(pick("charging_update_time"))),
-        ("Timezone", _format_byd_page_value(timezone_name)),
-    ]
 
     if compact:
-        cards = compact_cards
+        cards = [
+            ("SoC", _format_byd_page_value(pick("soc_percent"), "%")),
+            ("Range", _format_byd_page_value(pick("range_km"), " km")),
+            ("Power", _format_byd_page_value(pick("power_w"), " W")),
+            ("Charge ETA", _format_eta_value(pick("time_to_full_minutes"))),
+            ("Mileage", _format_byd_page_value(pick("total_mileage_km"), " km")),
+            ("Model", _format_byd_page_value(pick("model_name"))),
+            ("VIN", _format_byd_page_value(pick("vin"))),
+            ("Last success", _format_byd_page_value(last_success)),
+            ("Observed", _format_byd_page_value(observed_at)),
+            ("Inside temp", _format_byd_page_value(pick("inside_temp_c"), " C")),
+            ("Outside temp", _format_byd_page_value(pick("outside_temp_c"), " C")),
+            ("Brand", _format_byd_page_value(pick("brand_name"))),
+        ]
     else:
         cards = [
             ("VIN", _format_byd_page_value(pick("vin"))),
@@ -344,16 +231,6 @@ def _build_byd_page(
         </article>
         """
         for label, value in cards
-    )
-
-    compact_table_html = "".join(
-        f"""
-        <article class="compact-cell">
-          <span class="compact-cell-label">{html.escape(str(label))}</span>
-          <strong class="compact-cell-value">{html.escape(str(value))}</strong>
-        </article>
-        """
-        for label, value in compact_cards
     )
 
     error_html = ""
@@ -402,27 +279,11 @@ def _build_byd_page(
     </details>
         """
 
-    content_html = f"""
-    <section class="compact-table">
-      {compact_table_html}
-    </section>
-    """ if compact else f"""
-    {overview_html}
-    <section class="{grid_class}">
-      {card_html}
-    </section>
-    {error_html}
-    {details_html}
-    """
-
-    refresh_meta = '<meta http-equiv="refresh" content="60">' if compact else ""
-
     return f"""<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  {refresh_meta}
   <title>BYD Status</title>
   <style>
     :root {{
@@ -512,10 +373,6 @@ def _build_byd_page(
       margin: 0 0 24px;
       color: var(--muted);
     }}
-    h2 {{
-      margin: 0;
-      font-size: 1rem;
-    }}
     .grid {{
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
@@ -525,145 +382,6 @@ def _build_byd_page(
       grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
       gap: 8px;
       align-items: stretch;
-    }}
-    .overview-card {{
-      display: grid;
-      gap: 16px;
-      background: rgba(17, 24, 39, 0.9);
-      border: 1px solid rgba(148, 163, 184, 0.22);
-      border-radius: 18px;
-      padding: 16px;
-      box-shadow: 0 10px 24px rgba(0, 0, 0, 0.18);
-      margin-bottom: 16px;
-    }}
-    .compact-table {{
-      display: grid;
-      grid-template-columns: repeat(5, minmax(0, 1fr));
-      gap: 8px;
-    }}
-    .compact-cell {{
-      display: grid;
-      gap: 4px;
-      min-width: 0;
-      padding: 9px 10px;
-      border-radius: 12px;
-      background: rgba(17, 24, 39, 0.9);
-      border: 1px solid rgba(148, 163, 184, 0.18);
-    }}
-    .compact-cell-label {{
-      color: var(--muted);
-      font-size: 0.66rem;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }}
-    .compact-cell-value {{
-      font-size: 0.78rem;
-      line-height: 1.15;
-      overflow-wrap: anywhere;
-      word-break: break-word;
-    }}
-    .overview-heading {{
-      display: flex;
-      align-items: flex-start;
-      justify-content: space-between;
-      gap: 12px;
-      flex-wrap: wrap;
-    }}
-    .overview-heading p {{
-      margin: 6px 0 0;
-      color: var(--muted);
-      font-size: 0.86rem;
-    }}
-    .overview-total {{
-      display: grid;
-      justify-items: end;
-      gap: 4px;
-      min-width: 0;
-    }}
-    .overview-total span,
-    .overview-total small,
-    .overview-map-header span,
-    .map-caption {{
-      color: var(--muted);
-      font-size: 0.8rem;
-    }}
-    .overview-total strong {{
-      font-size: 1.5rem;
-    }}
-    .daily-bars {{
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(28px, 1fr));
-      gap: 8px;
-      align-items: end;
-      min-height: 180px;
-      padding: 12px;
-      border-radius: 14px;
-      background: rgba(15, 23, 42, 0.72);
-      border: 1px solid rgba(148, 163, 184, 0.14);
-    }}
-    .daily-bar {{
-      display: grid;
-      align-content: end;
-      justify-items: center;
-      gap: 6px;
-      min-width: 0;
-      min-height: 156px;
-    }}
-    .daily-bar-fill {{
-      width: 100%;
-      min-height: 6px;
-      border-radius: 999px 999px 8px 8px;
-      background: linear-gradient(180deg, rgba(56, 189, 248, 0.95) 0%, rgba(96, 165, 250, 0.58) 100%);
-      box-shadow: 0 8px 22px rgba(56, 189, 248, 0.22);
-    }}
-    .daily-bar-label,
-    .daily-bar-value {{
-      writing-mode: vertical-rl;
-      transform: rotate(180deg);
-      font-size: 0.7rem;
-      color: var(--muted);
-      line-height: 1;
-      white-space: nowrap;
-    }}
-    .daily-bar-value {{
-      color: var(--text);
-    }}
-    .overview-map {{
-      display: grid;
-      gap: 10px;
-    }}
-    .overview-map-header {{
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 10px;
-      flex-wrap: wrap;
-    }}
-    .map-shell {{
-      overflow: hidden;
-      border-radius: 16px;
-      border: 1px solid rgba(148, 163, 184, 0.18);
-      background: rgba(15, 23, 42, 0.72);
-      min-height: 220px;
-    }}
-    .map-shell iframe {{
-      width: 100%;
-      height: 220px;
-      border: 0;
-      display: block;
-    }}
-    .empty-state {{
-      display: grid;
-      place-items: center;
-      min-height: 160px;
-      padding: 16px;
-      border-radius: 14px;
-      border: 1px dashed rgba(148, 163, 184, 0.26);
-      color: var(--muted);
-      text-align: center;
     }}
     .metric {{
       background: rgba(17, 24, 39, 0.88);
@@ -711,21 +429,6 @@ def _build_byd_page(
       .compact-grid {{
         grid-template-columns: repeat(2, minmax(0, 1fr));
       }}
-      .compact-table {{
-        grid-template-columns: repeat(3, minmax(0, 1fr));
-      }}
-      .daily-bars {{
-        grid-template-columns: repeat(auto-fit, minmax(22px, 1fr));
-        gap: 6px;
-      }}
-      .daily-bar {{
-        min-height: 140px;
-      }}
-      .map-shell,
-      .map-shell iframe {{
-        min-height: 190px;
-        height: 190px;
-      }}
     }}
     .error-box {{
       margin-top: 24px;
@@ -760,7 +463,11 @@ def _build_byd_page(
   <main class="{main_class}">
     {nav_html}
     {heading_html}
-    {content_html}
+    <section class="{grid_class}">
+      {card_html}
+    </section>
+    {error_html}
+    {details_html}
   </main>
 </body>
 </html>"""
@@ -820,6 +527,10 @@ async def index(request: Request) -> HTMLResponse:
 
 @app.get("/byd", response_class=HTMLResponse)
 async def byd_page(embed: bool = Query(default=False)) -> HTMLResponse:
+    if not embed:
+        status_html = _read_byd_re_status_html()
+        if status_html:
+            return HTMLResponse(_decorate_byd_re_status_html(status_html))
     latest_samples = database.get_latest_samples()
     statuses = _with_network_ble_placeholder(await coordinator.statuses.snapshot())
     return HTMLResponse(_build_byd_page(statuses, latest_samples, compact=embed))

@@ -489,7 +489,7 @@ input[type="range"] {
 #weekly-chart,
 #monthly-chart,
 #byd-summary-frame {
-  height: 420px;
+  height: 270px;
 }
 
 .byd-status-subsection {
