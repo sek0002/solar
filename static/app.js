@@ -182,12 +182,23 @@ function formatKwPerHour(value) {
   return `${ratePerMinuteToKwPerHour(value).toFixed(3)} kW/hr`;
 }
 
+function formatWatts(value) {
+  if (value === null || value === undefined || Number.isNaN(value)) {
+    return "n/a";
+  }
+  return `${Number(value).toFixed(1)} W`;
+}
+
 function ratePerMinuteToKwh(ratePerMinute, deltaMinutes) {
   return (Number(ratePerMinute) * deltaMinutes) / 60000;
 }
 
 function ratePerMinuteToKwPerHour(value) {
   return (Number(value) * 60) / 1000;
+}
+
+function wattsToKw(value) {
+  return Number(value) / 1000;
 }
 
 function getDayKey(dateLike) {
@@ -251,6 +262,10 @@ function getAxisTitleSubRate() {
 
 function buildRateHoverTemplate(label) {
   return `<b>${label}</b><br>%{x}<br>%{y:.3f} kW/hr<br>%{customdata:.1f} W/min<extra></extra>`;
+}
+
+function buildPowerHoverTemplate(label) {
+  return `<b>${label}</b><br>%{x}<br>%{y:.3f} kW<br>%{customdata:.1f} W<extra></extra>`;
 }
 
 function getMinuteOfWeek(dateLike) {
@@ -324,26 +339,46 @@ function buildWeeklyMeanSeries(historySeries, valueKey) {
   }
 
   const toleranceMinutes = 20;
+  const minuteBuckets = new Map();
+
+  historySeries.forEach((item) => {
+    const value = Number(item[valueKey]);
+    if (Number.isNaN(value)) {
+      return;
+    }
+    const minute = getMinuteOfWeek(item.observed_at);
+    const bucket = minuteBuckets.get(minute) || { sum: 0, count: 0 };
+    bucket.sum += value;
+    bucket.count += 1;
+    minuteBuckets.set(minute, bucket);
+  });
+
+  const minutesPerWeek = 7 * 24 * 60;
   return buildFutureTimeline().map((futureTime) => {
     const targetMinute = getMinuteOfWeek(futureTime);
-    const matches = historySeries.filter((item) => {
-      const historicalMinute = getMinuteOfWeek(item.observed_at);
-      const delta = Math.abs(historicalMinute - targetMinute);
-      const wrappedDelta = Math.min(delta, (7 * 24 * 60) - delta);
-      return wrappedDelta <= toleranceMinutes;
-    });
+    let sum = 0;
+    let count = 0;
 
-    if (!matches.length) {
+    for (let offset = -toleranceMinutes; offset <= toleranceMinutes; offset += 1) {
+      const candidateMinute = (targetMinute + offset + minutesPerWeek) % minutesPerWeek;
+      const bucket = minuteBuckets.get(candidateMinute);
+      if (!bucket) {
+        continue;
+      }
+      sum += bucket.sum;
+      count += bucket.count;
+    }
+
+    if (!count) {
       return {
         observed_at: futureTime.toISOString(),
         value: null
       };
     }
 
-    const averageValue = matches.reduce((sum, item) => sum + Number(item[valueKey]), 0) / matches.length;
     return {
       observed_at: futureTime.toISOString(),
-      value: averageValue
+      value: sum / count
     };
   });
 }
@@ -364,6 +399,33 @@ function buildNowLine(xValue) {
       dash: "dash"
     }
   };
+}
+
+function getBydPowerWatts(item) {
+  const payload = item && item.raw_payload ? item.raw_payload : {};
+  const realtime = payload && payload.realtime ? payload.realtime : {};
+  const nestedGl = realtime.gl;
+  if (payload.power_w !== null && payload.power_w !== undefined && !Number.isNaN(Number(payload.power_w))) {
+    return Number(payload.power_w);
+  }
+  if (nestedGl !== null && nestedGl !== undefined && !Number.isNaN(Number(nestedGl))) {
+    return Number(nestedGl);
+  }
+  if (item && item.grid_usage_watts !== null && item.grid_usage_watts !== undefined && !Number.isNaN(Number(item.grid_usage_watts))) {
+    return Number(item.grid_usage_watts) * 60;
+  }
+  return null;
+}
+
+function getBydPowerSeries(items) {
+  return items
+    .filter((item) => item.source === "byd_ev")
+    .map((item) => ({
+      ...item,
+      power_w: getBydPowerWatts(item)
+    }))
+    .filter((item) => item.power_w !== null)
+    .sort((left, right) => new Date(left.observed_at) - new Date(right.observed_at));
 }
 
 function getChartHeight() {
@@ -538,6 +600,7 @@ function formatMetricCard(item) {
   const isImputed = item.raw_payload && item.raw_payload.imputed;
   if (item.source === "byd_ev") {
     const payload = item.raw_payload || {};
+    const powerWatts = getBydPowerWatts(item);
     const etaMinutes = payload.time_to_full_minutes;
     const etaText = etaMinutes === null || etaMinutes === undefined
       ? "n/a"
@@ -545,7 +608,11 @@ function formatMetricCard(item) {
     return `
       <article class="metric-card">
         <span>byd_ev</span>
-        ${formatMetricReading("BYD EV", item.grid_usage_watts)}
+        <div class="metric-reading">
+          <span class="metric-reading-label">BYD EV</span>
+          <strong class="metric-reading-main">${powerWatts === null ? "n/a" : `${wattsToKw(powerWatts).toFixed(3)} kW`}</strong>
+          <small class="metric-reading-sub">${formatWatts(powerWatts)}</small>
+        </div>
         <small>SoC: ${payload.soc_percent === null || payload.soc_percent === undefined ? "n/a" : `${Number(payload.soc_percent).toFixed(0)}%`}</small>
         <small>Range: ${payload.range_km === null || payload.range_km === undefined ? "n/a" : `${Number(payload.range_km).toFixed(0)} km`}</small>
         <small>Charge ETA: ${etaText}</small>
@@ -717,6 +784,7 @@ function getTodayAndWeekTotals(items) {
   const todayKey = getDayKey(now);
   const weekStart = new Date(now.getTime() - 7 * 24 * 3600000);
   const monthKey = getMonthKey(now);
+  const bydItems = getBydPowerSeries(items);
 
   const solarSegments = buildEnergySegments(
     items
@@ -731,10 +799,8 @@ function getTodayAndWeekTotals(items) {
     "grid_usage_watts"
   );
   const evSegments = buildEnergySegments(
-    items
-      .filter((item) => item.source === "byd_ev" && item.grid_usage_watts !== null)
-      .sort((left, right) => new Date(left.observed_at) - new Date(right.observed_at)),
-    "grid_usage_watts"
+    bydItems,
+    "power_w"
   );
 
   const dailySolar = solarSegments
@@ -910,12 +976,14 @@ function renderBleSolarChart(items, historyItems) {
   const siteSolarHistory = historyItems
     .filter((item) => item.source === "local_site" && item.solar_generation_watts !== null)
     .sort((left, right) => new Date(left.observed_at) - new Date(right.observed_at));
-  const evItems = items
-    .filter((item) => item.source === "byd_ev" && item.grid_usage_watts !== null)
-    .sort((left, right) => new Date(left.observed_at) - new Date(right.observed_at));
-  const evHistoryItems = historyItems
-    .filter((item) => item.source === "byd_ev" && item.grid_usage_watts !== null)
-    .sort((left, right) => new Date(left.observed_at) - new Date(right.observed_at));
+  const evItems = getBydPowerSeries(items);
+  const evHistoryItems = getBydPowerSeries(historyItems);
+  const bleProjection = buildProjectionSeries(bleGrid, "grid_usage_watts");
+  const bleWeeklyMean = buildWeeklyMeanSeries(bleGridHistory, "grid_usage_watts").filter((item) => item.value !== null);
+  const solarProjection = buildProjectionSeries(siteSolar, "solar_generation_watts");
+  const solarWeeklyMean = buildWeeklyMeanSeries(siteSolarHistory, "solar_generation_watts").filter((item) => item.value !== null);
+  const evProjection = buildProjectionSeries(evItems, "power_w");
+  const evWeeklyMean = buildWeeklyMeanSeries(evHistoryItems, "power_w").filter((item) => item.value !== null);
 
   const chartTheme = buildChartTheme();
   const nowX = bleGrid.length || siteSolar.length || evItems.length ? toChartTime(new Date()) : null;
@@ -942,18 +1010,18 @@ function renderBleSolarChart(items, historyItems) {
       line: { color: "rgba(0,0,0,0)", width: 0 }
     },
     {
-      x: buildProjectionSeries(bleGrid, "grid_usage_watts").map((item) => toChartTime(item.observed_at)),
-      y: buildProjectionSeries(bleGrid, "grid_usage_watts").map((item) => ratePerMinuteToKwPerHour(item.value)),
-      customdata: buildProjectionSeries(bleGrid, "grid_usage_watts").map((item) => Number(item.value)),
+      x: bleProjection.map((item) => toChartTime(item.observed_at)),
+      y: bleProjection.map((item) => ratePerMinuteToKwPerHour(item.value)),
+      customdata: bleProjection.map((item) => Number(item.value)),
       mode: "lines",
       name: "BLE grid trend",
       line: { color: dark ? "#7fb0ff" : "#6f96d8", width: 1.5, dash: "dot" },
       hovertemplate: buildRateHoverTemplate("BLE grid trend")
     },
     {
-      x: buildWeeklyMeanSeries(bleGridHistory, "grid_usage_watts").filter((item) => item.value !== null).map((item) => toChartTime(item.observed_at)),
-      y: buildWeeklyMeanSeries(bleGridHistory, "grid_usage_watts").filter((item) => item.value !== null).map((item) => ratePerMinuteToKwPerHour(item.value)),
-      customdata: buildWeeklyMeanSeries(bleGridHistory, "grid_usage_watts").filter((item) => item.value !== null).map((item) => Number(item.value)),
+      x: bleWeeklyMean.map((item) => toChartTime(item.observed_at)),
+      y: bleWeeklyMean.map((item) => ratePerMinuteToKwPerHour(item.value)),
+      customdata: bleWeeklyMean.map((item) => Number(item.value)),
       mode: "lines",
       name: "BLE grid weekly mean",
       line: { color: dark ? "#7fb0ff" : "#6f96d8", width: 1.2, dash: "dash" },
@@ -982,18 +1050,18 @@ function renderBleSolarChart(items, historyItems) {
       line: { color: "rgba(0,0,0,0)", width: 0 }
     },
     {
-      x: buildProjectionSeries(siteSolar, "solar_generation_watts").map((item) => toChartTime(item.observed_at)),
-      y: buildProjectionSeries(siteSolar, "solar_generation_watts").map((item) => ratePerMinuteToKwPerHour(item.value)),
-      customdata: buildProjectionSeries(siteSolar, "solar_generation_watts").map((item) => Number(item.value)),
+      x: solarProjection.map((item) => toChartTime(item.observed_at)),
+      y: solarProjection.map((item) => ratePerMinuteToKwPerHour(item.value)),
+      customdata: solarProjection.map((item) => Number(item.value)),
       mode: "lines",
       name: "Site solar trend",
       line: { color: dark ? "#8ee29d" : "#7cc98a", width: 1.5, dash: "dot" },
       hovertemplate: buildRateHoverTemplate("Site solar trend")
     },
     {
-      x: buildWeeklyMeanSeries(siteSolarHistory, "solar_generation_watts").filter((item) => item.value !== null).map((item) => toChartTime(item.observed_at)),
-      y: buildWeeklyMeanSeries(siteSolarHistory, "solar_generation_watts").filter((item) => item.value !== null).map((item) => ratePerMinuteToKwPerHour(item.value)),
-      customdata: buildWeeklyMeanSeries(siteSolarHistory, "solar_generation_watts").filter((item) => item.value !== null).map((item) => Number(item.value)),
+      x: solarWeeklyMean.map((item) => toChartTime(item.observed_at)),
+      y: solarWeeklyMean.map((item) => ratePerMinuteToKwPerHour(item.value)),
+      customdata: solarWeeklyMean.map((item) => Number(item.value)),
       mode: "lines",
       name: "Site solar weekly mean",
       line: { color: dark ? "#8ee29d" : "#7cc98a", width: 1.2, dash: "dash" },
@@ -1002,16 +1070,16 @@ function renderBleSolarChart(items, historyItems) {
     },
     {
       x: evItems.map((item) => toChartTime(item.observed_at)),
-      y: evItems.map((item) => ratePerMinuteToKwPerHour(item.grid_usage_watts)),
-      customdata: evItems.map((item) => Number(item.grid_usage_watts)),
+      y: evItems.map((item) => wattsToKw(item.power_w)),
+      customdata: evItems.map((item) => Number(item.power_w)),
       mode: "lines",
       name: "BYD EV",
       line: { color: dark ? "#ffb45b" : "#d6882e", width: 1.6, shape: "linear" },
-      hovertemplate: buildRateHoverTemplate("BYD EV")
+      hovertemplate: buildPowerHoverTemplate("BYD EV")
     },
     {
       x: evItems.map((item) => toChartTime(item.observed_at)),
-      y: evItems.map((item) => Number(item.grid_usage_watts)),
+      y: evItems.map((item) => Number(item.power_w)),
       yaxis: "y2",
       mode: "lines",
       name: "BYD EV raw",
@@ -1020,23 +1088,23 @@ function renderBleSolarChart(items, historyItems) {
       line: { color: "rgba(0,0,0,0)", width: 0 }
     },
     {
-      x: buildProjectionSeries(evItems, "grid_usage_watts").map((item) => toChartTime(item.observed_at)),
-      y: buildProjectionSeries(evItems, "grid_usage_watts").map((item) => ratePerMinuteToKwPerHour(item.value)),
-      customdata: buildProjectionSeries(evItems, "grid_usage_watts").map((item) => Number(item.value)),
+      x: evProjection.map((item) => toChartTime(item.observed_at)),
+      y: evProjection.map((item) => wattsToKw(item.value)),
+      customdata: evProjection.map((item) => Number(item.value)),
       mode: "lines",
       name: "BYD EV trend",
       line: { color: dark ? "#ffb45b" : "#d6882e", width: 1.5, dash: "dot" },
-      hovertemplate: buildRateHoverTemplate("BYD EV trend")
+      hovertemplate: buildPowerHoverTemplate("BYD EV trend")
     },
     {
-      x: buildWeeklyMeanSeries(evHistoryItems, "grid_usage_watts").filter((item) => item.value !== null).map((item) => toChartTime(item.observed_at)),
-      y: buildWeeklyMeanSeries(evHistoryItems, "grid_usage_watts").filter((item) => item.value !== null).map((item) => ratePerMinuteToKwPerHour(item.value)),
-      customdata: buildWeeklyMeanSeries(evHistoryItems, "grid_usage_watts").filter((item) => item.value !== null).map((item) => Number(item.value)),
+      x: evWeeklyMean.map((item) => toChartTime(item.observed_at)),
+      y: evWeeklyMean.map((item) => wattsToKw(item.value)),
+      customdata: evWeeklyMean.map((item) => Number(item.value)),
       mode: "lines",
       name: "BYD EV weekly mean",
       line: { color: dark ? "#ffb45b" : "#d6882e", width: 1.2, dash: "dash" },
       opacity: 0.35,
-      hovertemplate: buildRateHoverTemplate("BYD EV weekly mean")
+      hovertemplate: buildPowerHoverTemplate("BYD EV weekly mean")
     }
   ];
 
@@ -1085,13 +1153,11 @@ function renderCumulativeChart(items) {
   const bleGridItems = items
     .filter((item) => item.source === "ble" && item.grid_usage_watts !== null)
     .sort((left, right) => new Date(left.observed_at) - new Date(right.observed_at));
-  const evItems = items
-    .filter((item) => item.source === "byd_ev" && item.grid_usage_watts !== null)
-    .sort((left, right) => new Date(left.observed_at) - new Date(right.observed_at));
+  const evItems = getBydPowerSeries(items);
 
   const solarKwh = integrateSeriesKwh(solarItems, "solar_generation_watts");
   const gridKwh = integrateSeriesKwh(bleGridItems, "grid_usage_watts");
-  const evKwh = integrateSeriesKwh(evItems, "grid_usage_watts");
+  const evKwh = integrateSeriesKwh(evItems, "power_w");
   const xValues = [
     ...solarKwh.map((item) => toChartTime(item.observed_at)),
     ...gridKwh.map((item) => toChartTime(item.observed_at)),
@@ -1215,19 +1281,17 @@ function renderEnergyBreakdowns(items) {
   const bleGridItems = items
     .filter((item) => item.source === "ble" && item.grid_usage_watts !== null)
     .sort((left, right) => new Date(left.observed_at) - new Date(right.observed_at));
-  const bydItems = items
-    .filter((item) => item.source === "byd_ev" && item.grid_usage_watts !== null)
-    .sort((left, right) => new Date(left.observed_at) - new Date(right.observed_at));
+  const bydItems = getBydPowerSeries(items);
 
   const solarHourBars = aggregateEnergyByBucket(buildEnergySegments(solarItems, "solar_generation_watts"), getHourKey);
   const gridHourBars = aggregateEnergyByBucket(buildEnergySegments(bleGridItems, "grid_usage_watts"), getHourKey);
-  const bydHourBars = aggregateEnergyByBucket(buildEnergySegments(bydItems, "grid_usage_watts"), getHourKey);
+  const bydHourBars = aggregateEnergyByBucket(buildEnergySegments(bydItems, "power_w"), getHourKey);
   const solarWeekBars = aggregateEnergyByBucket(buildEnergySegments(solarItems, "solar_generation_watts"), getWeekKey);
   const gridWeekBars = aggregateEnergyByBucket(buildEnergySegments(bleGridItems, "grid_usage_watts"), getWeekKey);
-  const bydWeekBars = aggregateEnergyByBucket(buildEnergySegments(bydItems, "grid_usage_watts"), getWeekKey);
+  const bydWeekBars = aggregateEnergyByBucket(buildEnergySegments(bydItems, "power_w"), getWeekKey);
   const solarMonthBars = aggregateEnergyByBucket(buildEnergySegments(solarItems, "solar_generation_watts"), getMonthKey);
   const gridMonthBars = aggregateEnergyByBucket(buildEnergySegments(bleGridItems, "grid_usage_watts"), getMonthKey);
-  const bydMonthBars = aggregateEnergyByBucket(buildEnergySegments(bydItems, "grid_usage_watts"), getMonthKey);
+  const bydMonthBars = aggregateEnergyByBucket(buildEnergySegments(bydItems, "power_w"), getMonthKey);
 
   function combineBars(solarBars, gridBars, evBars) {
     const map = new Map();
