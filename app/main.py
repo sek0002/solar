@@ -26,6 +26,14 @@ database = Database(settings.database_path)
 coordinator = PollingCoordinator(settings, database)
 
 
+def _static_asset_version(path: str) -> str:
+    asset_path = BASE_DIR / path
+    try:
+        return str(int(asset_path.stat().st_mtime))
+    except OSError:
+        return "1"
+
+
 def _parse_api_datetime(value: Optional[str], fallback: datetime) -> datetime:
     if not value:
         return fallback
@@ -470,6 +478,7 @@ async def index(request: Request) -> HTMLResponse:
             "request": request,
             "default_hours": settings.api_default_hours,
             "timezone_name": settings.timezone_name,
+            "static_app_version": _static_asset_version("static/app.js"),
             "latest_samples": latest_samples,
             "statuses": statuses,
         },

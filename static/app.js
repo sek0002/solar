@@ -1303,4 +1303,4 @@ resetRangeButton.addEventListener("click", () => {
 
 window.addEventListener("resize", resizeCharts);
 refresh();
-setInterval(refresh, 10000);
+setInterval(refresh, 30000);
