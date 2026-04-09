@@ -15,6 +15,9 @@ const evBatteryLabel = document.querySelector("#ev-battery-label");
 const topbarGauge = document.querySelector("#topbar-gauge");
 const topbarSolarValue = document.querySelector("#topbar-solar-value");
 const topbarBleValue = document.querySelector("#topbar-ble-value");
+const topbarBydGauge = document.querySelector("#topbar-byd-gauge");
+const topbarBydValue = document.querySelector("#topbar-byd-value");
+const topbarBydSubvalue = document.querySelector("#topbar-byd-subvalue");
 const themeToggle = document.querySelector("#theme-toggle");
 const bleChartElement = document.querySelector("#ble-chart");
 const cumulativeChartElement = document.querySelector("#cumulative-chart");
@@ -219,7 +222,7 @@ function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
 }
 
-function getInfernoSolarColor(ratePerMinute) {
+function getInfernoSolarColor(ratePerMinute, maxKwPerHour = 5) {
   if (ratePerMinute === null || ratePerMinute === undefined || Number.isNaN(Number(ratePerMinute))) {
     return "#4c1d4b";
   }
@@ -230,7 +233,7 @@ function getInfernoSolarColor(ratePerMinute) {
     { t: 0.75, color: [249, 142, 8] },
     { t: 1.0, color: [252, 255, 164] }
   ];
-  const normalized = clamp(ratePerMinuteToKwPerHour(ratePerMinute) / 5, 0, 1);
+  const normalized = clamp(ratePerMinuteToKwPerHour(ratePerMinute) / maxKwPerHour, 0, 1);
   const upperIndex = stops.findIndex((stop) => stop.t >= normalized);
   const upper = upperIndex === -1 ? stops[stops.length - 1] : stops[upperIndex];
   const lower = upperIndex <= 0 ? stops[0] : stops[upperIndex - 1];
@@ -256,13 +259,34 @@ function renderTopbarGauge(samples) {
   if (topbarGauge) {
     topbarGauge.style.setProperty("--solar-progress", `${solarProgress}turn`);
     topbarGauge.style.setProperty("--ble-progress", `${bleProgress}turn`);
-    topbarGauge.style.setProperty("--solar-fill", getInfernoSolarColor(solarRate));
+    topbarGauge.style.setProperty("--solar-fill", getInfernoSolarColor(solarRate, 5));
   }
   if (topbarSolarValue) {
     topbarSolarValue.textContent = formatGaugeKwPerHour(solarRate);
   }
   if (topbarBleValue) {
     topbarBleValue.textContent = bleRate === null ? "BLE n/a" : `BLE ${formatGaugeKwPerHour(bleRate)}`;
+  }
+}
+
+function renderBydTopbarGauge(samples, pollers) {
+  const bydSample = (samples || []).find((item) => item.source === "byd_ev");
+  const glWatts = bydSample ? getBydPowerWatts(bydSample) : null;
+  const glRate = glWatts === null ? null : glWatts / 60;
+  const socPercent = getBydSocPercent(samples, pollers);
+  const glProgress = clamp((glRate === null ? 0 : ratePerMinuteToKwPerHour(glRate) / 3), 0, 1);
+  const socProgress = clamp((socPercent === null ? 0 : socPercent / 100), 0, 1);
+
+  if (topbarBydGauge) {
+    topbarBydGauge.style.setProperty("--solar-progress", `${glProgress}turn`);
+    topbarBydGauge.style.setProperty("--ble-progress", `${socProgress}turn`);
+    topbarBydGauge.style.setProperty("--solar-fill", getInfernoSolarColor(glRate, 3));
+  }
+  if (topbarBydValue) {
+    topbarBydValue.textContent = formatGaugeKwPerHour(glRate);
+  }
+  if (topbarBydSubvalue) {
+    topbarBydSubvalue.textContent = socPercent === null ? "SoC n/a" : `SoC ${socPercent.toFixed(0)}%`;
   }
 }
 
@@ -1474,6 +1498,7 @@ async function refresh() {
       .map(formatMetricCard)
       .join("");
     renderTopbarGauge(statusPayload.latest_samples);
+    renderBydTopbarGauge(statusPayload.latest_samples, statusPayload.pollers);
     renderBleBatteryState(statusPayload.pollers);
     renderEvBatteryState(statusPayload.latest_samples, statusPayload.pollers);
 
@@ -1499,6 +1524,7 @@ async function refresh() {
     refreshText.textContent = "Refresh failed";
     renderCollectorStrip([]);
     renderTopbarGauge([]);
+    renderBydTopbarGauge([], []);
     renderBleBatteryState([]);
     renderEvBatteryState([], []);
   }

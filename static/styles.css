@@ -182,6 +182,7 @@ body {
 
 .topbar-gauge-inner-ticks,
 .topbar-gauge-ble-ring,
+.topbar-gauge-byd-ring,
 .topbar-gauge-solar-ring {
   position: absolute;
   inset: 0;
@@ -203,6 +204,19 @@ body {
     radial-gradient(circle at center, #0d1830 0 50px, transparent 50px 100%),
     conic-gradient(from -90deg, var(--solar-fill) 0turn var(--solar-progress), rgba(99, 109, 132, 0.18) var(--solar-progress) 1turn);
   box-shadow: inset 0 0 0 2px rgba(240, 244, 255, 0.1);
+}
+
+.topbar-gauge-byd-ring {
+  inset: 18px;
+  z-index: 1;
+  background:
+    conic-gradient(from -90deg, rgba(255, 152, 79, 0.98) 0turn var(--ble-progress), transparent var(--ble-progress) 1turn);
+  -webkit-mask: radial-gradient(circle at center, transparent 0 61px, #000 61px 65px, transparent 65px 100%);
+  mask: radial-gradient(circle at center, transparent 0 61px, #000 61px 65px, transparent 65px 100%);
+}
+
+.topbar-gauge-byd-solar-ring {
+  box-shadow: inset 0 0 0 2px rgba(255, 214, 181, 0.09);
 }
 
 .topbar-gauge-inner-ticks {
