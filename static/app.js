@@ -268,21 +268,6 @@ function buildPowerHoverTemplate(label) {
   return `<b>${label}</b><br>%{x}<br>%{y:.3f} kW<br>%{customdata:.1f} W<extra></extra>`;
 }
 
-function getMinuteOfWeek(dateLike) {
-  const parts = getZonedParts(dateLike);
-  const date = new Date(
-    Number(parts.year),
-    Number(parts.month) - 1,
-    Number(parts.day),
-    Number(parts.hour),
-    Number(parts.minute),
-    0,
-    0
-  );
-  const day = (date.getDay() + 6) % 7;
-  return (day * 24 * 60) + (date.getHours() * 60) + date.getMinutes();
-}
-
 function buildNowLine(xValue) {
   const dark = getTheme() === "dark";
   return {
