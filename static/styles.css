@@ -506,12 +506,41 @@ input[type="range"] {
   margin-top: 0;
 }
 
+.byd-status-grid {
+  align-items: stretch;
+}
+
 #byd-summary-frame {
   width: 100%;
   min-height: 320px;
   border: 1px solid var(--line);
   border-radius: 16px;
   background: var(--panel);
+}
+
+#byd-map-frame {
+  width: 100%;
+  min-height: 320px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--panel);
+}
+
+.byd-map-caption,
+.byd-map-empty {
+  color: var(--muted);
+  font-size: 0.84rem;
+}
+
+.byd-map-empty {
+  display: grid;
+  place-items: center;
+  min-height: 320px;
+  border: 1px dashed var(--line);
+  border-radius: 16px;
+  background: var(--panel);
+  text-align: center;
+  padding: 16px;
 }
 
 .metric-reading {

@@ -7,6 +7,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
+from urllib.parse import urlencode
 
 from fastapi import FastAPI, Header, HTTPException, Query, Request
 from fastapi.responses import FileResponse, HTMLResponse
@@ -85,6 +86,50 @@ def _format_eta_value(minutes: object) -> str:
     hours = total // 60
     remainder = total % 60
     return f"{hours}h {remainder}m"
+
+
+def _extract_gps_coordinates(payload: object) -> tuple[float | None, float | None]:
+    if not isinstance(payload, dict):
+        return None, None
+
+    def _coerce_number(value: object) -> float | None:
+        try:
+            return float(value) if value not in (None, "") else None
+        except (TypeError, ValueError):
+            return None
+
+    latitude_keys = ("latitude", "lat", "gpsLat", "gpsLatitude")
+    longitude_keys = ("longitude", "lon", "lng", "gpsLng", "gpsLongitude")
+
+    for latitude_key in latitude_keys:
+        latitude = _coerce_number(payload.get(latitude_key))
+        if latitude is None:
+            continue
+        for longitude_key in longitude_keys:
+            longitude = _coerce_number(payload.get(longitude_key))
+            if longitude is not None:
+                return latitude, longitude
+
+    for value in payload.values():
+        latitude, longitude = _extract_gps_coordinates(value)
+        if latitude is not None and longitude is not None:
+            return latitude, longitude
+
+    return None, None
+
+
+def _build_map_embed_url(latitude: float | None, longitude: float | None) -> str | None:
+    if latitude is None or longitude is None:
+        return None
+    bounds_delta = 0.015
+    params = urlencode(
+        {
+            "bbox": f"{longitude - bounds_delta:.6f},{latitude - bounds_delta:.6f},{longitude + bounds_delta:.6f},{latitude + bounds_delta:.6f}",
+            "layer": "mapnik",
+            "marker": f"{latitude:.6f},{longitude:.6f}",
+        }
+    )
+    return f"https://www.openstreetmap.org/export/embed.html?{params}"
 
 
 def _read_byd_re_status_html() -> Optional[str]:
@@ -548,6 +593,10 @@ async def service_worker() -> FileResponse:
 async def index(request: Request) -> HTMLResponse:
     latest_samples = database.get_latest_samples()
     statuses = _with_network_ble_placeholder(await coordinator.statuses.snapshot())
+    byd_sample = next((item for item in latest_samples if item.get("source") == "byd_ev"), None)
+    byd_payload = dict(byd_sample.get("raw_payload") or {}) if byd_sample else {}
+    byd_latitude, byd_longitude = _extract_gps_coordinates(byd_payload.get("gps") or {})
+    byd_map_embed_url = _build_map_embed_url(byd_latitude, byd_longitude)
     return templates.TemplateResponse(
         request,
         "index.html",
@@ -562,6 +611,9 @@ async def index(request: Request) -> HTMLResponse:
             "sw_version": _static_asset_version("static/sw.js"),
             "latest_samples": latest_samples,
             "statuses": statuses,
+            "byd_map_embed_url": byd_map_embed_url,
+            "byd_map_latitude": byd_latitude,
+            "byd_map_longitude": byd_longitude,
         },
     )
 

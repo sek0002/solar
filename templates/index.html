@@ -136,10 +136,10 @@
       <div class="panel-header">
         <div>
           <h2>BYD vehicle status</h2>
-          <span>Embedded from the standalone BYD page.</span>
+          <span>Live vehicle status and latest map location.</span>
         </div>
       </div>
-      <div class="charts-grid charts-grid-one">
+      <div class="charts-grid charts-grid-two byd-status-grid">
         <section class="chart-panel-subsection byd-status-subsection">
           <div class="subchart-header">
             <h3>BYD vehicle status</h3>
@@ -152,6 +152,25 @@
             loading="lazy"
             referrerpolicy="same-origin"
           ></iframe>
+        </section>
+
+        <section class="chart-panel-subsection byd-status-subsection">
+          <div class="subchart-header">
+            <h3>BYD map location</h3>
+            <span>Latest GPS location from the stored BYD payload.</span>
+          </div>
+          {% if byd_map_embed_url %}
+          <iframe
+            id="byd-map-frame"
+            src="{{ byd_map_embed_url }}"
+            title="BYD map location"
+            loading="lazy"
+            referrerpolicy="no-referrer-when-downgrade"
+          ></iframe>
+          <div class="byd-map-caption">GPS {{ "%.5f"|format(byd_map_latitude) }}, {{ "%.5f"|format(byd_map_longitude) }}</div>
+          {% else %}
+          <div class="byd-map-empty">GPS location not available yet.</div>
+          {% endif %}
         </section>
       </div>
     </section>
