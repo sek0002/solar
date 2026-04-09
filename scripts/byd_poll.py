@@ -20,6 +20,8 @@ def _pick_first(*values: Any) -> Any:
 def _as_float(value: Any) -> float | None:
     if value is None or value == "":
         return None
+    if isinstance(value, str):
+        value = value.strip().replace(",", "")
     try:
         return float(value)
     except (TypeError, ValueError):

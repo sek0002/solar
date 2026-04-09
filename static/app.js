@@ -295,18 +295,27 @@ function getBydPowerWatts(item) {
   const flatTotalPower = payload.total_power_w;
   const vehicleGl = vehicle.gl;
   const vehicleTotalPower = vehicle.totalPower;
+  const normalizeNumber = (value) => {
+    if (value === null || value === undefined) {
+      return null;
+    }
+    const normalized = typeof value === "string" ? value.trim().replace(/,/g, "") : value;
+    const numeric = Number(normalized);
+    return Number.isFinite(numeric) ? numeric : null;
+  };
   const candidates = [
-    payload.power_w,
     flatGl,
-    flatTotalPower,
     nestedGl,
     vehicleGl,
+    payload.power_w,
+    flatTotalPower,
     vehicleTotalPower
   ];
 
   for (const candidate of candidates) {
-    if (candidate !== null && candidate !== undefined && !Number.isNaN(Number(candidate))) {
-      return Number(candidate);
+    const numeric = normalizeNumber(candidate);
+    if (numeric !== null) {
+      return numeric;
     }
   }
   if (item && item.grid_usage_watts !== null && item.grid_usage_watts !== undefined && !Number.isNaN(Number(item.grid_usage_watts))) {

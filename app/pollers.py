@@ -1072,9 +1072,9 @@ class BydEvPoller:
         if payload.get("error"):
             raise RuntimeError(str(payload["error"]))
 
-        power_w = payload.get("power_w")
+        power_w = payload.get("gl_w")
         if power_w in (None, ""):
-            power_w = payload.get("gl_w")
+            power_w = payload.get("power_w")
         if power_w in (None, ""):
             power_w = payload.get("total_power_w")
         charging_rate_w_per_min = float(power_w) / 60.0 if power_w is not None else 0.0
