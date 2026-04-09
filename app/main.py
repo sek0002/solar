@@ -7,7 +7,6 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
-from urllib.parse import urlencode
 
 from fastapi import FastAPI, Header, HTTPException, Query, Request
 from fastapi.responses import FileResponse, HTMLResponse
@@ -88,50 +87,6 @@ def _format_eta_value(minutes: object) -> str:
     return f"{hours}h {remainder}m"
 
 
-def _extract_gps_coordinates(payload: object) -> tuple[float | None, float | None]:
-    if not isinstance(payload, dict):
-        return None, None
-
-    def _coerce_number(value: object) -> float | None:
-        try:
-            return float(value) if value not in (None, "") else None
-        except (TypeError, ValueError):
-            return None
-
-    latitude_keys = ("latitude", "lat", "gpsLat", "gpsLatitude")
-    longitude_keys = ("longitude", "lon", "lng", "gpsLng", "gpsLongitude")
-
-    for latitude_key in latitude_keys:
-        latitude = _coerce_number(payload.get(latitude_key))
-        if latitude is None:
-            continue
-        for longitude_key in longitude_keys:
-            longitude = _coerce_number(payload.get(longitude_key))
-            if longitude is not None:
-                return latitude, longitude
-
-    for value in payload.values():
-        latitude, longitude = _extract_gps_coordinates(value)
-        if latitude is not None and longitude is not None:
-            return latitude, longitude
-
-    return None, None
-
-
-def _build_map_embed_url(latitude: float | None, longitude: float | None) -> str | None:
-    if latitude is None or longitude is None:
-        return None
-    bounds_delta = 0.015
-    params = urlencode(
-        {
-            "bbox": f"{longitude - bounds_delta:.6f},{latitude - bounds_delta:.6f},{longitude + bounds_delta:.6f},{latitude + bounds_delta:.6f}",
-            "layer": "mapnik",
-            "marker": f"{latitude:.6f},{longitude:.6f}",
-        }
-    )
-    return f"https://www.openstreetmap.org/export/embed.html?{params}"
-
-
 def _read_byd_re_status_html() -> Optional[str]:
     status_path = Path(settings.byd_re_dir).expanduser() / "status.html"
     if not status_path.exists():
@@ -142,110 +97,28 @@ def _read_byd_re_status_html() -> Optional[str]:
         return None
 
 
-def _decorate_byd_re_status_html(
-    status_html: str,
-    *,
-    map_url: str | None = None,
-    latitude: float | None = None,
-    longitude: float | None = None,
-) -> str:
-    map_css = ""
-    map_script = ""
-    if map_url:
-        escaped_map_url = html.escape(map_url, quote=True)
-        coordinates_label = (
-            f"GPS {latitude:.5f}, {longitude:.5f}" if latitude is not None and longitude is not None else "Live GPS location"
-        )
-        escaped_coordinates_label = html.escape(coordinates_label)
-        map_css = """
-  .solar-byd-map-panel {
-    display: grid;
-    gap: 10px;
-    min-height: 320px;
-  }
-  .solar-byd-map-frame {
-    width: 100%;
-    min-height: 320px;
-    height: 100%;
-    border: 0;
-    border-radius: 14px;
-    background: rgba(15, 23, 42, 0.72);
-  }
-  .solar-byd-map-caption {
-    color: #94a3b8;
-    font-size: 0.82rem;
-  }
-"""
-        map_script = f"""
-<script id="solar-byd-map-swap">
-window.addEventListener("load", () => {{
-  const selectorList = [
-    '[data-testid*="car"]',
-    '[class*="car-panel"]',
-    '[class*="carPanel"]',
-    '[class*="vehicle-panel"]',
-    '[class*="vehiclePanel"]',
-    '[class*="car-card"]',
-    '[class*="vehicle-card"]',
-    '#car',
-    '#vehicle'
-  ];
-
-  const explicitPanel = selectorList
-    .map((selector) => document.querySelector(selector))
-    .find(Boolean);
-
-  const mediaPanel = explicitPanel || Array.from(document.querySelectorAll("section, article, div"))
-    .filter((element) => element.querySelector("img, svg, canvas"))
-    .sort((left, right) => {{
-      const leftRect = left.getBoundingClientRect();
-      const rightRect = right.getBoundingClientRect();
-      return (rightRect.width * rightRect.height) - (leftRect.width * leftRect.height);
-    }})[0];
-
-  if (!mediaPanel) {{
-    return;
-  }}
-
-  const mapPanel = document.createElement("div");
-  mapPanel.className = "solar-byd-map-panel";
-  mapPanel.innerHTML = `
-    <iframe
-      class="solar-byd-map-frame"
-      src="{escaped_map_url}"
-      title="BYD vehicle location"
-      loading="lazy"
-      referrerpolicy="no-referrer-when-downgrade"
-    ></iframe>
-    <div class="solar-byd-map-caption">{escaped_coordinates_label}</div>
-  `;
-
-  mediaPanel.replaceChildren(mapPanel);
-}});
-</script>
-"""
-
-    dark_style = f"""
+def _decorate_byd_re_status_html(status_html: str) -> str:
+    dark_style = """
 <style id="solar-byd-dark-override">
-  :root {{ color-scheme: dark; }}
-  html, body {{
+  :root { color-scheme: dark; }
+  html, body {
     background: #0f172a !important;
     color: #e5e7eb !important;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif !important;
-  }}
-  body {{
+  }
+  body {
     margin: 0 !important;
     padding: 24px 20px 36px !important;
-  }}
-  .solar-byd-toolbar {{
+  }
+  .solar-byd-toolbar {
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 12px;
     margin: 0 auto 20px;
     max-width: 1200px;
-  }}
-  .solar-byd-back {{
+  }
+  .solar-byd-back {
     display: inline-flex;
     align-items: center;
     gap: 8px;
@@ -255,35 +128,33 @@ window.addEventListener("load", () => {{
     color: #e5e7eb !important;
     text-decoration: none;
     font-weight: 700;
-  }}
-  .solar-byd-back:hover {{
+  }
+  .solar-byd-back:hover {
     background: rgba(56, 189, 248, 0.26);
-  }}
-  .solar-byd-title {{
+  }
+  .solar-byd-title {
     color: #94a3b8;
     font-size: 0.9rem;
-  }}
-  .container, main, .content, .wrapper {{
+  }
+  .container, main, .content, .wrapper {
     max-width: 1200px;
     margin-left: auto !important;
     margin-right: auto !important;
-  }}
-  img, svg, canvas {{
+  }
+  img, svg, canvas {
     max-width: 100% !important;
     height: auto !important;
-  }}
-  .card, .panel, table, section, article, .metric, .tile {{
+  }
+  .card, .panel, table, section, article, .metric, .tile {
     background: rgba(17, 24, 39, 0.88) !important;
     color: #e5e7eb !important;
     border-color: rgba(148, 163, 184, 0.18) !important;
-  }}
-  h1, h2, h3, h4, h5, h6, strong, b, th, td, p, span, div, li, label {{
+  }
+  h1, h2, h3, h4, h5, h6, strong, b, th, td, p, span, div, li, label {
     color: inherit;
-  }}
-  a {{ color: #38bdf8 !important; }}
-  {map_css}
+  }
+  a { color: #38bdf8 !important; }
 </style>
-{map_script}
 """
     toolbar = """
 <div class="solar-byd-toolbar">
@@ -656,23 +527,12 @@ async def index(request: Request) -> HTMLResponse:
 
 @app.get("/byd", response_class=HTMLResponse)
 async def byd_page(embed: bool = Query(default=False)) -> HTMLResponse:
-    latest_samples = database.get_latest_samples()
-    statuses = _with_network_ble_placeholder(await coordinator.statuses.snapshot())
     if not embed:
         status_html = _read_byd_re_status_html()
         if status_html:
-            byd_sample = next((item for item in latest_samples if item.get("source") == "byd_ev"), None)
-            raw_payload = dict(byd_sample.get("raw_payload") or {}) if byd_sample else {}
-            latitude, longitude = _extract_gps_coordinates(raw_payload.get("gps") or {})
-            map_url = _build_map_embed_url(latitude, longitude)
-            return HTMLResponse(
-                _decorate_byd_re_status_html(
-                    status_html,
-                    map_url=map_url,
-                    latitude=latitude,
-                    longitude=longitude,
-                )
-            )
+            return HTMLResponse(_decorate_byd_re_status_html(status_html))
+    latest_samples = database.get_latest_samples()
+    statuses = _with_network_ble_placeholder(await coordinator.statuses.snapshot())
     return HTMLResponse(_build_byd_page(statuses, latest_samples, compact=embed))
 
 
