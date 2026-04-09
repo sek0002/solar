@@ -18,4 +18,8 @@ if [ "${POLLER_ONLY:-false}" = "true" ]; then
   exec python3 -m app.poller_only
 fi
 
+if [ "${BLE_SITE_ONLY:-false}" = "true" ]; then
+  exec python3 -m uvicorn app.ble_site:app --host "${BLE_SITE_HOST:-0.0.0.0}" --port "${BLE_SITE_PORT:-8002}"
+fi
+
 exec python3 -m uvicorn app.main:app --host 0.0.0.0 --port 8001

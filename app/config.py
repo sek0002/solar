@@ -39,6 +39,7 @@ class Settings:
     database_path: Path = Path(os.getenv("DATABASE_PATH", "data/solar_monitor.db"))
     timezone_name: str = os.getenv("TIMEZONE", "Australia/Melbourne")
     poller_only: bool = _env_bool("POLLER_ONLY", False)
+    ble_site_only: bool = _env_bool("BLE_SITE_ONLY", False)
 
     ble_enabled: bool = _env_bool("BLE_ENABLED", True)
     ble_mac: str = os.getenv("BLE_MAC", "C9:91:09:7A:2C:B9")
@@ -51,6 +52,14 @@ class Settings:
     remote_ingest_url: str = os.getenv("REMOTE_INGEST_URL", "").rstrip("/")
     remote_ingest_token: str = os.getenv("REMOTE_INGEST_TOKEN", "")
     ingest_token: str = os.getenv("INGEST_TOKEN", "")
+    network_ble_enabled: bool = _env_bool("NETWORK_BLE_ENABLED", False)
+    network_ble_url: str = os.getenv("NETWORK_BLE_URL", "").rstrip("/")
+    network_ble_timeout_seconds: float = _env_float("NETWORK_BLE_TIMEOUT_SECONDS", 10.0)
+    network_ble_poll_seconds: float = _env_float("NETWORK_BLE_POLL_SECONDS", 15.0)
+    network_ble_usage_line_index: int = _env_int("NETWORK_BLE_USAGE_LINE_INDEX", 0)
+    network_ble_battery_line_index: int = _env_int("NETWORK_BLE_BATTERY_LINE_INDEX", 1)
+    network_ble_timestamp_line_index: int = _env_int("NETWORK_BLE_TIMESTAMP_LINE_INDEX", 2)
+    network_ble_state_line_index: int = _env_int("NETWORK_BLE_STATE_LINE_INDEX", 3)
 
     local_site_enabled: bool = _env_bool("LOCAL_SITE_ENABLED", True)
     local_site_url: str = os.getenv("LOCAL_SITE_URL", "http://127.0.0.1/")
@@ -100,6 +109,8 @@ class Settings:
 
     api_default_hours: int = _env_int("API_DEFAULT_HOURS", 24)
     api_max_points: int = _env_int("API_MAX_POINTS", 5000)
+    ble_site_host: str = os.getenv("BLE_SITE_HOST", "0.0.0.0")
+    ble_site_port: int = _env_int("BLE_SITE_PORT", 8002)
 
 
 settings = Settings()

@@ -78,6 +78,38 @@ BYD_ENABLED=false
 
 In that mode, `poll_solar.sh` runs only the pollers and does not start `uvicorn`.
 
+To run the Raspberry Pi as a tiny BLE-only site that exposes the latest reading as simple text lines, set:
+
+```env
+BLE_SITE_ONLY=true
+BLE_ENABLED=true
+NETWORK_BLE_ENABLED=false
+LOCAL_SITE_ENABLED=false
+BYD_ENABLED=false
+BLE_SITE_PORT=8002
+```
+
+That starts a minimal app on `http://<pi-ip>:8002/` with these lines:
+
+1. latest BLE grid usage watts
+2. battery percent
+3. observed timestamp
+4. BLE state
+
+There is also a simple human-readable page at `http://<pi-ip>:8002/html`.
+
+To have the main webapp server read BLE from that page, set on the server:
+
+```env
+BLE_ENABLED=false
+NETWORK_BLE_ENABLED=true
+NETWORK_BLE_URL=http://<pi-ip>:8002/
+LOCAL_SITE_ENABLED=true
+BYD_ENABLED=true
+```
+
+In that mode, the webapp fetches the BLE text page just like the solar/local site fetch path, stores the reading as `ble`, and shows a `network_ble` collector status card.
+
 If you want port 80 instead of port 8001, either put nginx in front of the app or grant the venv Python permission to bind low ports:
 
 ```bash

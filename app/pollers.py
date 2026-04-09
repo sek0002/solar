@@ -630,6 +630,142 @@ class LocalSitePoller:
         return None
 
 
+class NetworkBlePoller:
+    def __init__(self, settings: Settings, database: Database, statuses: StatusRegistry) -> None:
+        self.settings = settings
+        self.database = database
+        self.statuses = statuses
+        self._stopped = asyncio.Event()
+        self._failure_started_at: Optional[datetime] = None
+
+    async def run(self) -> None:
+        await self.statuses.update(
+            "network_ble",
+            state="starting",
+            details={"url": self.settings.network_ble_url},
+        )
+        async with httpx.AsyncClient(timeout=self.settings.network_ble_timeout_seconds) as client:
+            while not self._stopped.is_set():
+                try:
+                    if not self.settings.network_ble_url:
+                        raise RuntimeError("NETWORK_BLE_URL is required when NETWORK_BLE_ENABLED=true")
+
+                    response = await client.get(self.settings.network_ble_url)
+                    response.raise_for_status()
+                    self._failure_started_at = None
+
+                    payload = self._parse_response(response.text)
+                    observed_at = datetime.now(timezone.utc)
+                    self.database.insert_sample(
+                        source="ble",
+                        observed_at=observed_at,
+                        grid_usage_watts=payload["grid_usage_watts"],
+                        solar_generation_watts=None,
+                        raw_payload=payload,
+                    )
+                    await self.statuses.update(
+                        "network_ble",
+                        state="connected",
+                        mark_success=True,
+                        details={
+                            "url": self.settings.network_ble_url,
+                            "latest_grid_usage_watts": payload["grid_usage_watts"],
+                            "battery_percent": payload.get("battery_percent"),
+                            "remote_observed_at": payload.get("remote_observed_at"),
+                            "remote_state": payload.get("remote_state"),
+                            "latest_observed_at": observed_at.isoformat(),
+                        },
+                    )
+                except httpx.HTTPError as exc:
+                    if self._failure_started_at is None:
+                        self._failure_started_at = datetime.now(timezone.utc)
+                    await self._record_error_fallback(str(exc))
+                    await self.statuses.update(
+                        "network_ble",
+                        state="error",
+                        error=str(exc),
+                        details={
+                            "url": self.settings.network_ble_url,
+                            "connection_failure_started_at": self._failure_started_at.isoformat(),
+                        },
+                    )
+                except Exception as exc:
+                    LOGGER.exception("Unexpected network BLE failure")
+                    if self._failure_started_at is None:
+                        self._failure_started_at = datetime.now(timezone.utc)
+                    await self._record_error_fallback(str(exc))
+                    await self.statuses.update(
+                        "network_ble",
+                        state="error",
+                        error=str(exc),
+                        details={
+                            "url": self.settings.network_ble_url,
+                            "connection_failure_started_at": self._failure_started_at.isoformat(),
+                        },
+                    )
+
+                await asyncio.sleep(self.settings.network_ble_poll_seconds)
+
+    async def stop(self) -> None:
+        self._stopped.set()
+
+    async def _record_error_fallback(self, error_message: str) -> None:
+        observed_at = datetime.now(timezone.utc)
+        use_zero_fallback = False
+        if self._failure_started_at is not None:
+            streak_minutes = (observed_at - self._failure_started_at).total_seconds() / 60.0
+            use_zero_fallback = streak_minutes >= self.settings.ble_zero_after_minutes
+
+        average_grid = self.database.get_recent_average(
+            source="ble",
+            column="grid_usage_watts",
+            count=self.settings.failure_average_window,
+        )
+        payload = {
+            "grid_usage_watts": 0.0 if use_zero_fallback else (average_grid if average_grid is not None else 0.0),
+            "url": self.settings.network_ble_url,
+            "fallback_reason": error_message,
+            "imputed": True,
+            "average_window": self.settings.failure_average_window,
+            "zero_after_minutes": self.settings.ble_zero_after_minutes,
+            "used_zero_fallback": use_zero_fallback,
+            "source_kind": "network_ble",
+        }
+        self.database.insert_sample(
+            source="ble",
+            observed_at=observed_at,
+            grid_usage_watts=payload["grid_usage_watts"],
+            solar_generation_watts=None,
+            raw_payload=payload,
+        )
+
+    def _parse_response(self, body_text: str) -> dict[str, Any]:
+        lines = [line.strip() for line in body_text.splitlines()]
+
+        def read_line(index: int) -> Optional[str]:
+            if 0 <= index < len(lines):
+                value = lines[index].strip()
+                return value or None
+            return None
+
+        usage_text = read_line(self.settings.network_ble_usage_line_index)
+        if usage_text is None:
+            raise ValueError("Network BLE page did not include a usage line")
+
+        battery_text = read_line(self.settings.network_ble_battery_line_index)
+        remote_observed_at = read_line(self.settings.network_ble_timestamp_line_index)
+        remote_state = read_line(self.settings.network_ble_state_line_index)
+
+        return {
+            "grid_usage_watts": float(usage_text),
+            "battery_percent": int(float(battery_text)) if battery_text not in (None, "") else None,
+            "remote_observed_at": remote_observed_at,
+            "remote_state": remote_state,
+            "url": self.settings.network_ble_url,
+            "source_kind": "network_ble",
+        }
+
+
 class TuyaCloudClient:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
@@ -955,6 +1091,11 @@ class PollingCoordinator:
             ble_poller = PowerpalBlePoller(self.settings, self.database, self.statuses)
             self.pollers.append(ble_poller)
             self.tasks.append(asyncio.create_task(ble_poller.run(), name="ble-poller"))
+
+        if self.settings.network_ble_enabled:
+            network_ble_poller = NetworkBlePoller(self.settings, self.database, self.statuses)
+            self.pollers.append(network_ble_poller)
+            self.tasks.append(asyncio.create_task(network_ble_poller.run(), name="network-ble-poller"))
 
         if self.settings.local_site_enabled:
             site_poller = LocalSitePoller(self.settings, self.database, self.statuses)
