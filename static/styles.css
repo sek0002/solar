@@ -70,6 +70,52 @@ body {
   align-self: stretch;
 }
 
+.collector-strip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.collector-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  box-shadow: var(--shadow);
+  color: var(--muted);
+  font-size: 0.82rem;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.collector-chip-light {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--muted) 65%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--line) 92%, transparent);
+}
+
+.collector-chip.is-connected .collector-chip-light {
+  background: #7fd38a;
+  box-shadow: 0 0 10px rgba(127, 211, 138, 0.45);
+}
+
+.collector-chip.is-waiting .collector-chip-light {
+  background: #f6c85f;
+  box-shadow: 0 0 10px rgba(246, 200, 95, 0.4);
+}
+
+.collector-chip.is-error .collector-chip-light {
+  background: #ff8e8e;
+  box-shadow: 0 0 10px rgba(255, 142, 142, 0.4);
+}
+
 .page-tab {
   padding: 8px 12px;
   border-radius: 12px;

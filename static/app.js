@@ -4,6 +4,7 @@ const startDateInput = document.querySelector("#start-date");
 const startTimeInput = document.querySelector("#start-time");
 const resetRangeButton = document.querySelector("#reset-range");
 const statusCards = document.querySelector("#status-cards");
+const collectorStrip = document.querySelector("#collector-strip");
 const latestValues = document.querySelector("#latest-values");
 const totalsTableBody = document.querySelector("#totals-table-body");
 const refreshText = document.querySelector("#last-refresh");
@@ -419,6 +420,36 @@ function renderStatusCards(items) {
     }
   });
   bindStatusCardPersistence();
+}
+
+function getCollectorChipClass(state) {
+  if (state === "connected") {
+    return "is-connected";
+  }
+  if (state === "error" || state === "disconnected") {
+    return "is-error";
+  }
+  return "is-waiting";
+}
+
+function formatCollectorLabel(name) {
+  return String(name || "")
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function renderCollectorStrip(items) {
+  if (!collectorStrip) {
+    return;
+  }
+  collectorStrip.innerHTML = (items || [])
+    .map((item) => `
+      <div class="collector-chip ${getCollectorChipClass(item.state || "")}" title="${formatCollectorLabel(item.name)}: ${item.state || "unknown"}">
+        <span class="collector-chip-light" aria-hidden="true"></span>
+        <span>${formatCollectorLabel(item.name)}</span>
+      </div>
+    `)
+    .join("");
 }
 
 function applyStoredChartState(layout, chartKey, traces) {
@@ -1353,6 +1384,7 @@ async function refresh() {
     const items = Array.isArray(samplesPayload.items) ? samplesPayload.items : [];
 
     renderStatusCards(statusPayload.pollers);
+    renderCollectorStrip(statusPayload.pollers);
     latestValues.innerHTML = statusPayload.latest_samples
       .filter((item) => item.source !== "tuya_ev")
       .map(formatMetricCard)
@@ -1380,6 +1412,7 @@ async function refresh() {
     console.error("Refresh failed", error);
     renderEmptyCharts();
     refreshText.textContent = "Refresh failed";
+    renderCollectorStrip([]);
     renderBleBatteryState([]);
     renderEvBatteryState([], []);
   }
