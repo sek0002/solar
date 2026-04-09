@@ -51,27 +51,29 @@
         <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Toggle dark mode">
           Dark mode
         </button>
-        <div id="topbar-gauge" class="topbar-gauge" aria-label="Solar generation and BLE gauge">
-          <div class="topbar-gauge-ble-ring"></div>
-          <div class="topbar-gauge-solar-ring">
-            <div class="topbar-gauge-core">
-              <span class="topbar-gauge-label">Solar</span>
-              <strong id="topbar-solar-value" class="topbar-gauge-value">n/a</strong>
-              <small id="topbar-ble-value" class="topbar-gauge-subvalue">BLE n/a</small>
+        <div class="topbar-gauges" aria-label="Live topbar gauges">
+          <div id="topbar-gauge" class="topbar-gauge" aria-label="Solar generation and BLE gauge">
+            <div class="topbar-gauge-ble-ring"></div>
+            <div class="topbar-gauge-solar-ring">
+              <div class="topbar-gauge-core">
+                <span class="topbar-gauge-label">Solar</span>
+                <strong id="topbar-solar-value" class="topbar-gauge-value">n/a</strong>
+                <small id="topbar-ble-value" class="topbar-gauge-subvalue">BLE n/a</small>
+              </div>
             </div>
+            <div class="topbar-gauge-inner-ticks"></div>
           </div>
-          <div class="topbar-gauge-inner-ticks"></div>
-        </div>
-        <div id="topbar-byd-gauge" class="topbar-gauge" aria-label="BYD GL and EV SoC gauge">
-          <div class="topbar-gauge-byd-ring"></div>
-          <div class="topbar-gauge-solar-ring topbar-gauge-byd-solar-ring">
-            <div class="topbar-gauge-core">
-              <span class="topbar-gauge-label">GL</span>
-              <strong id="topbar-byd-value" class="topbar-gauge-value">n/a</strong>
-              <small id="topbar-byd-subvalue" class="topbar-gauge-subvalue">SoC n/a</small>
+          <div id="topbar-byd-gauge" class="topbar-gauge" aria-label="BYD GL and EV SoC gauge">
+            <div class="topbar-gauge-byd-ring"></div>
+            <div class="topbar-gauge-solar-ring topbar-gauge-byd-solar-ring">
+              <div class="topbar-gauge-core">
+                <span class="topbar-gauge-label">EV</span>
+                <strong id="topbar-byd-value" class="topbar-gauge-value">n/a</strong>
+                <small id="topbar-byd-subvalue" class="topbar-gauge-subvalue">SoC n/a</small>
+              </div>
             </div>
+            <div class="topbar-gauge-inner-ticks"></div>
           </div>
-          <div class="topbar-gauge-inner-ticks"></div>
         </div>
         <nav class="page-tabs topbar-tabs" aria-label="Pages">
           <a class="page-tab is-active" href="/">Dashboard</a>

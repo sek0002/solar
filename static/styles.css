@@ -49,8 +49,8 @@ body {
 }
 
 .shell {
-  width: min(1200px, calc(100% - 32px));
-  margin: 32px auto 48px;
+  width: min(1440px, calc(100% - 20px));
+  margin: 20px auto 40px;
 }
 
 .page-tabs {
@@ -149,6 +149,14 @@ body {
   align-items: center;
   gap: 4px;
   margin-bottom: 20px;
+}
+
+.topbar-gauges {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  flex-wrap: nowrap;
 }
 
 .status-inline {
@@ -304,7 +312,7 @@ body {
 
 .controls-inline {
   display: flex;
-  gap: 12px;
+  gap: 10px;
   align-items: center;
   flex-wrap: wrap;
   row-gap: 2px;
@@ -765,7 +773,7 @@ input[type="range"] {
   }
 
   .shell {
-    width: min(100% - 20px, 1200px);
+    width: min(100% - 16px, 1440px);
     margin-top: 20px;
   }
 }
