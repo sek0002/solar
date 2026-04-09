@@ -307,6 +307,7 @@ function getBydPowerWatts(item) {
     return Number.isFinite(numeric) ? numeric : null;
   };
   const candidates = [
+    payload.tracked_power_w,
     flatGl,
     nestedGl,
     vehicleGl,
@@ -318,11 +319,11 @@ function getBydPowerWatts(item) {
   for (const candidate of candidates) {
     const numeric = normalizeNumber(candidate);
     if (numeric !== null) {
-      return numeric;
+      return Math.max(0, numeric);
     }
   }
   if (item && item.grid_usage_watts !== null && item.grid_usage_watts !== undefined && !Number.isNaN(Number(item.grid_usage_watts))) {
-    return Number(item.grid_usage_watts) * 60;
+    return Math.max(0, Number(item.grid_usage_watts) * 60);
   }
   return null;
 }
