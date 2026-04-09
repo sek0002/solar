@@ -151,11 +151,100 @@ body {
 }
 
 .status-inline {
+  display: grid;
+  gap: 12px;
+  justify-content: flex-end;
+  justify-items: end;
+}
+
+.status-refresh {
+  text-align: right;
+}
+
+.status-lower {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 16px;
   flex-wrap: wrap;
   justify-content: flex-end;
+}
+
+.topbar-gauge {
+  --solar-progress: 0turn;
+  --ble-progress: 0turn;
+  --solar-fill: #641220;
+  position: relative;
+  width: 132px;
+  height: 132px;
+  flex: 0 0 auto;
+}
+
+.topbar-gauge-ticks,
+.topbar-gauge-ble-ring,
+.topbar-gauge-solar-ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+}
+
+.topbar-gauge-ticks {
+  background:
+    radial-gradient(circle at center, transparent 0 63px, rgba(245, 247, 250, 0.95) 63px 65px, transparent 65px 100%),
+    repeating-conic-gradient(from -90deg, rgba(245, 247, 250, 0.92) 0deg 2deg, transparent 2deg 12deg);
+  -webkit-mask: radial-gradient(circle at center, transparent 0 61px, #000 61px 100%);
+  mask: radial-gradient(circle at center, transparent 0 61px, #000 61px 100%);
+}
+
+.topbar-gauge-ble-ring {
+  inset: 10px;
+  background:
+    conic-gradient(from -90deg, #6cbcff 0turn var(--ble-progress), rgba(92, 128, 168, 0.2) var(--ble-progress) 1turn);
+  -webkit-mask: radial-gradient(circle at center, transparent 0 48px, #000 48px 56px, transparent 56px 100%);
+  mask: radial-gradient(circle at center, transparent 0 48px, #000 48px 56px, transparent 56px 100%);
+}
+
+.topbar-gauge-solar-ring {
+  inset: 18px;
+  background:
+    radial-gradient(circle at center, #0d1830 0 34px, transparent 34px 100%),
+    conic-gradient(from -90deg, var(--solar-fill) 0turn var(--solar-progress), rgba(99, 109, 132, 0.18) var(--solar-progress) 1turn);
+  box-shadow: inset 0 0 0 2px rgba(240, 244, 255, 0.1);
+}
+
+.topbar-gauge-solar-ring::after {
+  content: "";
+  position: absolute;
+  inset: 12px;
+  border-radius: 999px;
+  background: #0d1830;
+  box-shadow: 0 0 0 1px rgba(228, 235, 247, 0.08);
+}
+
+.topbar-gauge-core {
+  position: absolute;
+  inset: 30px;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  text-align: center;
+  gap: 2px;
+}
+
+.topbar-gauge-label {
+  color: var(--muted);
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.topbar-gauge-value {
+  font-size: 1.15rem;
+  line-height: 1;
+}
+
+.topbar-gauge-subvalue {
+  color: var(--muted);
+  font-size: 0.68rem;
 }
 
 .battery-inline {
@@ -618,6 +707,18 @@ input[type="range"] {
 
   .topbar {
     grid-template-columns: 1fr;
+  }
+
+  .status-inline {
+    justify-items: stretch;
+  }
+
+  .status-refresh {
+    text-align: left;
+  }
+
+  .status-lower {
+    justify-content: flex-start;
   }
 
   .page-tabs {

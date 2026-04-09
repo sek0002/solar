@@ -58,16 +58,29 @@
         <div id="collector-strip" class="collector-strip" aria-label="Collector status summary"></div>
       </div>
       <div class="status-inline">
-        <span id="last-refresh" class="last-refresh">Loading...</span>
-        <div class="battery-inline">
-          <div class="ev-battery-meter" aria-label="BLE battery level">
-            <div id="ble-battery-fill" class="ble-battery-fill"></div>
+        <span id="last-refresh" class="last-refresh status-refresh">Loading...</span>
+        <div class="status-lower">
+          <div id="topbar-gauge" class="topbar-gauge" aria-label="Solar generation and BLE gauge">
+            <div class="topbar-gauge-ticks"></div>
+            <div class="topbar-gauge-ble-ring"></div>
+            <div class="topbar-gauge-solar-ring">
+              <div class="topbar-gauge-core">
+                <span class="topbar-gauge-label">Solar</span>
+                <strong id="topbar-solar-value" class="topbar-gauge-value">n/a</strong>
+                <small id="topbar-ble-value" class="topbar-gauge-subvalue">BLE n/a</small>
+              </div>
+            </div>
           </div>
-          <span id="powerpal-battery" class="last-refresh">Battery n/a</span>
-          <div class="ev-battery-meter" aria-label="EV battery state of charge">
-            <div id="ev-battery-fill" class="ev-battery-fill"></div>
+          <div class="battery-inline">
+            <div class="ev-battery-meter" aria-label="BLE battery level">
+              <div id="ble-battery-fill" class="ble-battery-fill"></div>
+            </div>
+            <span id="powerpal-battery" class="last-refresh">Battery n/a</span>
+            <div class="ev-battery-meter" aria-label="EV battery state of charge">
+              <div id="ev-battery-fill" class="ev-battery-fill"></div>
+            </div>
+            <span id="ev-battery-label" class="last-refresh">EV SoC n/a</span>
           </div>
-          <span id="ev-battery-label" class="last-refresh">EV SoC n/a</span>
         </div>
       </div>
     </section>

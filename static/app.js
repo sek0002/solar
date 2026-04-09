@@ -12,6 +12,9 @@ const batteryText = document.querySelector("#powerpal-battery");
 const bleBatteryFill = document.querySelector("#ble-battery-fill");
 const evBatteryFill = document.querySelector("#ev-battery-fill");
 const evBatteryLabel = document.querySelector("#ev-battery-label");
+const topbarGauge = document.querySelector("#topbar-gauge");
+const topbarSolarValue = document.querySelector("#topbar-solar-value");
+const topbarBleValue = document.querySelector("#topbar-ble-value");
 const themeToggle = document.querySelector("#theme-toggle");
 const bleChartElement = document.querySelector("#ble-chart");
 const cumulativeChartElement = document.querySelector("#cumulative-chart");
@@ -193,6 +196,13 @@ function formatWatts(value) {
   return `${Number(value).toFixed(1)} W`;
 }
 
+function formatGaugeKwPerHour(value) {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) {
+    return "n/a";
+  }
+  return `${ratePerMinuteToKwPerHour(value).toFixed(2)} kW/hr`;
+}
+
 function ratePerMinuteToKwh(ratePerMinute, deltaMinutes) {
   return (Number(ratePerMinute) * deltaMinutes) / 60000;
 }
@@ -203,6 +213,57 @@ function ratePerMinuteToKwPerHour(value) {
 
 function wattsToKw(value) {
   return Number(value) / 1000;
+}
+
+function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, value));
+}
+
+function getInfernoSolarColor(ratePerMinute) {
+  if (ratePerMinute === null || ratePerMinute === undefined || Number.isNaN(Number(ratePerMinute))) {
+    return "#4c1d4b";
+  }
+  const stops = [
+    { t: 0.0, color: [27, 12, 65] },
+    { t: 0.25, color: [100, 19, 113] },
+    { t: 0.5, color: [187, 55, 84] },
+    { t: 0.75, color: [249, 142, 8] },
+    { t: 1.0, color: [252, 255, 164] }
+  ];
+  const normalized = clamp(ratePerMinuteToKwPerHour(ratePerMinute) / 5, 0, 1);
+  const upperIndex = stops.findIndex((stop) => stop.t >= normalized);
+  const upper = upperIndex === -1 ? stops[stops.length - 1] : stops[upperIndex];
+  const lower = upperIndex <= 0 ? stops[0] : stops[upperIndex - 1];
+  const span = upper.t - lower.t || 1;
+  const mix = (normalized - lower.t) / span;
+  const channels = lower.color.map((channel, index) => Math.round(channel + (upper.color[index] - channel) * mix));
+  return `rgb(${channels[0]}, ${channels[1]}, ${channels[2]})`;
+}
+
+function getLatestRateBySource(samples, source, valueKey) {
+  const latestItem = (samples || [])
+    .filter((item) => item.source === source && item[valueKey] !== null && item[valueKey] !== undefined)
+    .sort((left, right) => new Date(right.observed_at) - new Date(left.observed_at))[0];
+  return latestItem ? Number(latestItem[valueKey]) : null;
+}
+
+function renderTopbarGauge(samples) {
+  const solarRate = getLatestRateBySource(samples, "local_site", "solar_generation_watts");
+  const bleRate = getLatestRateBySource(samples, "ble", "grid_usage_watts");
+  const solarProgress = clamp((solarRate === null ? 0 : ratePerMinuteToKwPerHour(solarRate) / 5), 0, 1);
+  const bleProgress = clamp((bleRate === null ? 0 : ratePerMinuteToKwPerHour(bleRate) / 10), 0, 1);
+
+  if (topbarGauge) {
+    topbarGauge.style.setProperty("--solar-progress", `${solarProgress}turn`);
+    topbarGauge.style.setProperty("--ble-progress", `${bleProgress}turn`);
+    topbarGauge.style.setProperty("--solar-fill", getInfernoSolarColor(solarRate));
+  }
+  if (topbarSolarValue) {
+    topbarSolarValue.textContent = formatGaugeKwPerHour(solarRate);
+  }
+  if (topbarBleValue) {
+    topbarBleValue.textContent = bleRate === null ? "BLE n/a" : `BLE ${formatGaugeKwPerHour(bleRate)}`;
+  }
 }
 
 function getDayKey(dateLike) {
@@ -1412,6 +1473,7 @@ async function refresh() {
       .filter((item) => item.source !== "tuya_ev")
       .map(formatMetricCard)
       .join("");
+    renderTopbarGauge(statusPayload.latest_samples);
     renderBleBatteryState(statusPayload.pollers);
     renderEvBatteryState(statusPayload.latest_samples, statusPayload.pollers);
 
@@ -1436,6 +1498,7 @@ async function refresh() {
     renderEmptyCharts();
     refreshText.textContent = "Refresh failed";
     renderCollectorStrip([]);
+    renderTopbarGauge([]);
     renderBleBatteryState([]);
     renderEvBatteryState([], []);
   }
