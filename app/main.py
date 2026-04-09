@@ -141,6 +141,10 @@ def _decorate_byd_re_status_html(status_html: str) -> str:
     margin-left: auto !important;
     margin-right: auto !important;
   }
+  img, svg, canvas {
+    max-width: 100% !important;
+    height: auto !important;
+  }
   .card, .panel, table, section, article, .metric, .tile {
     background: rgba(17, 24, 39, 0.88) !important;
     color: #e5e7eb !important;
@@ -375,8 +379,9 @@ def _build_byd_page(
       gap: 14px;
     }}
     .compact-grid {{
-      grid-template-columns: repeat(4, minmax(0, 1fr));
+      grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
       gap: 8px;
+      align-items: stretch;
     }}
     .metric {{
       background: rgba(17, 24, 39, 0.88);
@@ -389,6 +394,8 @@ def _build_byd_page(
       padding: 10px 12px;
       border-radius: 14px;
       box-shadow: none;
+      min-width: 0;
+      overflow: hidden;
     }}
     .metric-label {{
       font-size: 0.82rem;
@@ -407,8 +414,21 @@ def _build_byd_page(
       margin-bottom: 4px;
     }}
     .compact-grid .metric-value {{
-      font-size: 0.95rem;
+      font-size: 0.9rem;
       line-height: 1.2;
+      overflow-wrap: anywhere;
+      word-break: break-word;
+    }}
+    @media (max-width: 720px) {{
+      .compact-header {{
+        flex-wrap: wrap;
+      }}
+      .compact-state {{
+        white-space: normal;
+      }}
+      .compact-grid {{
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }}
     }}
     .error-box {{
       margin-top: 24px;
