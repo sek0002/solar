@@ -253,9 +253,11 @@ function getLatestRateBySource(samples, source, valueKey) {
 function renderTopbarGauge(samples) {
   const solarRate = getLatestRateBySource(samples, "local_site", "solar_generation_watts");
   const bleRate = getLatestRateBySource(samples, "ble", "grid_usage_watts");
+  const bleProgress = clamp((bleRate === null ? 0 : ratePerMinuteToKwPerHour(bleRate) / 10), 0, 1);
 
   if (topbarGauge) {
-    topbarGauge.style.setProperty("--core-fill", getInfernoSolarColor(bleRate, 10));
+    topbarGauge.style.setProperty("--ring-progress", `${bleProgress}turn`);
+    topbarGauge.style.setProperty("--core-fill", getInfernoSolarColor(solarRate, 5));
     topbarGauge.style.setProperty("--inner-ring-stroke", "rgba(240, 244, 255, 0.1)");
   }
   if (topbarSolarValue) {
@@ -271,10 +273,11 @@ function renderBydTopbarGauge(samples, pollers) {
   const glWatts = bydSample ? getBydPowerWatts(bydSample) : null;
   const glRate = glWatts === null ? null : glWatts / 60;
   const socPercent = getBydSocPercent(samples, pollers);
-  const socRateEquivalent = socPercent === null ? null : (socPercent / 100) * (3 * 1000 / 60);
+  const socProgress = clamp((socPercent === null ? 0 : socPercent / 100), 0, 1);
 
   if (topbarBydGauge) {
-    topbarBydGauge.style.setProperty("--core-fill", getInfernoSolarColor(socRateEquivalent, 3));
+    topbarBydGauge.style.setProperty("--ring-progress", `${socProgress}turn`);
+    topbarBydGauge.style.setProperty("--core-fill", getInfernoSolarColor(glRate, 3));
     topbarBydGauge.style.setProperty("--inner-ring-stroke", "rgba(255, 214, 181, 0.09)");
   }
   if (topbarBydValue) {

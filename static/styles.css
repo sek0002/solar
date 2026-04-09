@@ -190,6 +190,7 @@ body {
 }
 
 .topbar-gauge {
+  --ring-progress: 0turn;
   --core-fill: #0d1830;
   --inner-ring-stroke: rgba(240, 244, 255, 0.1);
   position: relative;
@@ -210,7 +211,8 @@ body {
 .topbar-gauge-ble-ring {
   inset: 18px;
   z-index: 1;
-  background: rgba(108, 188, 255, 0.18);
+  background:
+    conic-gradient(from -90deg, rgba(108, 188, 255, 0.98) 0turn var(--ring-progress), rgba(108, 188, 255, 0.18) var(--ring-progress) 1turn);
   -webkit-mask: radial-gradient(circle at center, transparent 0 61px, #000 61px 65px, transparent 65px 100%);
   mask: radial-gradient(circle at center, transparent 0 61px, #000 61px 65px, transparent 65px 100%);
 }
@@ -224,7 +226,8 @@ body {
 .topbar-gauge-byd-ring {
   inset: 18px;
   z-index: 1;
-  background: rgba(255, 152, 79, 0.18);
+  background:
+    conic-gradient(from -90deg, rgba(255, 152, 79, 0.98) 0turn var(--ring-progress), rgba(255, 152, 79, 0.18) var(--ring-progress) 1turn);
   -webkit-mask: radial-gradient(circle at center, transparent 0 61px, #000 61px 65px, transparent 65px 100%);
   mask: radial-gradient(circle at center, transparent 0 61px, #000 61px 65px, transparent 65px 100%);
 }
