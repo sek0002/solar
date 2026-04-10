@@ -99,6 +99,46 @@ function buildLocalDateTime(dateValue, timeValue = "00:00") {
   return new Date(year, (month || 1) - 1, day || 1, hours || 0, minutes || 0, 0, 0);
 }
 
+function getTimeZoneOffsetMs(dateLike, timeZone = appTimezone) {
+  const date = new Date(dateLike);
+  const formatter = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23"
+  });
+  const parts = Object.fromEntries(
+    formatter.formatToParts(date)
+      .filter((part) => part.type !== "literal")
+      .map((part) => [part.type, part.value])
+  );
+  const zonedUtcMs = Date.UTC(
+    Number(parts.year),
+    Number(parts.month) - 1,
+    Number(parts.day),
+    Number(parts.hour),
+    Number(parts.minute),
+    Number(parts.second),
+    0
+  );
+  return zonedUtcMs - date.getTime();
+}
+
+function buildAppDateTime(dateValue, timeValue = "00:00") {
+  if (!dateValue) {
+    return new Date();
+  }
+  const [year, month, day] = dateValue.split("-").map(Number);
+  const [hours, minutes] = (timeValue || "00:00").split(":").map(Number);
+  const utcGuess = new Date(Date.UTC(year, (month || 1) - 1, day || 1, hours || 0, minutes || 0, 0, 0));
+  const firstPass = new Date(utcGuess.getTime() - getTimeZoneOffsetMs(utcGuess));
+  return new Date(firstPass.getTime() - getTimeZoneOffsetMs(firstPass) + getTimeZoneOffsetMs(utcGuess));
+}
+
 function formatLocalDate(date) {
   const parts = getZonedParts(date);
   return `${parts.year}-${parts.month}-${parts.day}`;
@@ -168,7 +208,7 @@ function ensureStartInputs() {
   if (startDateInput.value) {
     if (!startTimeInput.value) {
       const fallback = getDefaultStartDateTime(hoursInput.value || window.SOLAR_MONITOR_CONFIG.defaultHours || 24);
-      startTimeInput.value = `${String(fallback.getHours()).padStart(2, "0")}:${String(fallback.getMinutes()).padStart(2, "0")}`;
+      startTimeInput.value = formatLocalTime(fallback);
     }
     return;
   }
@@ -843,6 +883,26 @@ function toAppDate(dateLike) {
   );
 }
 
+function sortByObservedAt(items) {
+  return [...items].sort((left, right) => new Date(left.observed_at) - new Date(right.observed_at));
+}
+
+function buildWindowState(start, end) {
+  return {
+    start: new Date(start),
+    end: new Date(end)
+  };
+}
+
+function clipIntervalToWindow(startDate, endDate, windowState) {
+  const clippedStart = startDate < windowState.start ? windowState.start : startDate;
+  const clippedEnd = endDate > windowState.end ? windowState.end : endDate;
+  if (clippedEnd <= clippedStart) {
+    return null;
+  }
+  return { start: clippedStart, end: clippedEnd };
+}
+
 function getStartOfNextDay(dateLike) {
   const date = new Date(dateLike);
   date.setHours(24, 0, 0, 0);
@@ -889,32 +949,54 @@ function splitEnergyAcrossBuckets(startDate, endDate, averageRate, keyBuilder, n
   return segments;
 }
 
-function buildEnergySegments(series, valueKey, keyBuilder = getDayKey, nextBoundaryBuilder = getStartOfNextDay) {
+function buildEnergySegments(
+  series,
+  valueKey,
+  keyBuilder = getDayKey,
+  nextBoundaryBuilder = getStartOfNextDay,
+  windowState = null
+) {
   const segments = [];
   for (let index = 1; index < series.length; index += 1) {
     const previous = series[index - 1];
     const current = series[index];
     const previousDate = toAppDate(previous.observed_at);
     const currentDate = toAppDate(current.observed_at);
-    const deltaMinutes = (currentDate - previousDate) / 60000;
-    if (deltaMinutes <= 0) {
+    const clippedInterval = windowState
+      ? clipIntervalToWindow(previousDate, currentDate, windowState)
+      : { start: previousDate, end: currentDate };
+    if (!clippedInterval) {
       continue;
     }
     const averageRate = (Number(previous[valueKey]) + Number(current[valueKey])) / 2;
-    segments.push(...splitEnergyAcrossBuckets(previousDate, currentDate, averageRate, keyBuilder, nextBoundaryBuilder));
+    segments.push(
+      ...splitEnergyAcrossBuckets(
+        clippedInterval.start,
+        clippedInterval.end,
+        averageRate,
+        keyBuilder,
+        nextBoundaryBuilder
+      )
+    );
   }
   return segments;
 }
 
-function buildEnergyTotals(series, valueKey, keyBuilder = getDayKey, nextBoundaryBuilder = getStartOfNextDay) {
+function buildEnergyTotals(
+  series,
+  valueKey,
+  keyBuilder = getDayKey,
+  nextBoundaryBuilder = getStartOfNextDay,
+  windowState = null
+) {
   const totals = new Map();
-  buildEnergySegments(series, valueKey, keyBuilder, nextBoundaryBuilder).forEach((segment) => {
+  buildEnergySegments(series, valueKey, keyBuilder, nextBoundaryBuilder, windowState).forEach((segment) => {
     totals.set(segment.bucketKey, (totals.get(segment.bucketKey) || 0) + Number(segment.energy_kwh || 0));
   });
   return totals;
 }
 
-function integrateSeriesKwh(series, valueKey) {
+function integrateSeriesKwh(series, valueKey, windowState = null) {
   let cumulative = 0;
   const points = [];
   let currentDayKey = null;
@@ -922,6 +1004,9 @@ function integrateSeriesKwh(series, valueKey) {
   for (let index = 0; index < series.length; index += 1) {
     const current = series[index];
     const currentDate = toAppDate(current.observed_at);
+    if (windowState && (currentDate < windowState.start || currentDate > windowState.end)) {
+      continue;
+    }
     const dayKey = getDayKey(currentDate);
 
     if (dayKey !== currentDayKey) {
@@ -932,10 +1017,12 @@ function integrateSeriesKwh(series, valueKey) {
     if (index > 0) {
       const previous = series[index - 1];
       const previousDate = toAppDate(previous.observed_at);
-      const deltaMinutes = (currentDate - previousDate) / 60000;
-      if (deltaMinutes > 0) {
+      const clippedInterval = windowState
+        ? clipIntervalToWindow(previousDate, currentDate, windowState)
+        : { start: previousDate, end: currentDate };
+      if (clippedInterval) {
         const averageRate = (Number(previous[valueKey]) + Number(current[valueKey])) / 2;
-        const dayEnergy = splitEnergyAcrossBuckets(previousDate, currentDate, averageRate, getDayKey, getStartOfNextDay)
+        const dayEnergy = splitEnergyAcrossBuckets(clippedInterval.start, clippedInterval.end, averageRate, getDayKey, getStartOfNextDay)
           .filter((segment) => segment.bucketKey === dayKey)
           .reduce((sum, segment) => sum + segment.energy_kwh, 0);
         cumulative += dayEnergy;
@@ -1131,47 +1218,64 @@ function buildSortedBars(totals) {
     .sort((left, right) => left.label.localeCompare(right.label));
 }
 
+function getSeriesBySource(items) {
+  return {
+    solar: sortByObservedAt(items.filter((item) => item.source === "local_site" && item.solar_generation_watts !== null)),
+    grid: sortByObservedAt(items.filter((item) => item.source === "ble" && item.grid_usage_watts !== null)),
+    ev: getBydPowerSeries(items)
+  };
+}
 
-function renderEnergyBreakdowns(items) {
-  const solarItems = items
-    .filter((item) => item.source === "local_site" && item.solar_generation_watts !== null)
-    .sort((left, right) => new Date(left.observed_at) - new Date(right.observed_at));
-  const bleGridItems = items
-    .filter((item) => item.source === "ble" && item.grid_usage_watts !== null)
-    .sort((left, right) => new Date(left.observed_at) - new Date(right.observed_at));
-  const bydItems = getBydPowerSeries(items);
+function buildSummaryData(items, windowState) {
+  const series = getSeriesBySource(items);
+  return {
+    series,
+    cumulative: {
+      solar: integrateSeriesKwh(series.solar, "solar_generation_watts", windowState),
+      grid: integrateSeriesKwh(series.grid, "grid_usage_watts", windowState),
+      ev: integrateSeriesKwh(series.ev, "charging_rate_w_per_min", windowState)
+    },
+    hourly: {
+      solar: buildSortedBars(buildEnergyTotals(series.solar, "solar_generation_watts", getHourKey, getStartOfNextDay, windowState)),
+      grid: buildSortedBars(buildEnergyTotals(series.grid, "grid_usage_watts", getHourKey, getStartOfNextDay, windowState)),
+      ev: buildSortedBars(buildEnergyTotals(series.ev, "charging_rate_w_per_min", getHourKey, getStartOfNextDay, windowState))
+    },
+    weekly: {
+      solar: buildSortedBars(buildEnergyTotals(series.solar, "solar_generation_watts", getWeekKey, getStartOfNextWeek, windowState)),
+      grid: buildSortedBars(buildEnergyTotals(series.grid, "grid_usage_watts", getWeekKey, getStartOfNextWeek, windowState)),
+      ev: buildSortedBars(buildEnergyTotals(series.ev, "charging_rate_w_per_min", getWeekKey, getStartOfNextWeek, windowState))
+    },
+    monthly: {
+      solar: buildSortedBars(buildEnergyTotals(series.solar, "solar_generation_watts", getMonthKey, getStartOfNextMonth, windowState)),
+      grid: buildSortedBars(buildEnergyTotals(series.grid, "grid_usage_watts", getMonthKey, getStartOfNextMonth, windowState)),
+      ev: buildSortedBars(buildEnergyTotals(series.ev, "charging_rate_w_per_min", getMonthKey, getStartOfNextMonth, windowState))
+    }
+  };
+}
 
-  const solarHourBars = buildSortedBars(buildEnergyTotals(solarItems, "solar_generation_watts", getHourKey, getStartOfNextDay));
-  const gridHourBars = buildSortedBars(buildEnergyTotals(bleGridItems, "grid_usage_watts", getHourKey, getStartOfNextDay));
-  const bydHourBars = buildSortedBars(buildEnergyTotals(bydItems, "charging_rate_w_per_min", getHourKey, getStartOfNextDay));
-  const solarWeekBars = buildSortedBars(buildEnergyTotals(solarItems, "solar_generation_watts", getWeekKey, getStartOfNextWeek));
-  const gridWeekBars = buildSortedBars(buildEnergyTotals(bleGridItems, "grid_usage_watts", getWeekKey, getStartOfNextWeek));
-  const bydWeekBars = buildSortedBars(buildEnergyTotals(bydItems, "charging_rate_w_per_min", getWeekKey, getStartOfNextWeek));
-  const solarMonthBars = buildSortedBars(buildEnergyTotals(solarItems, "solar_generation_watts", getMonthKey, getStartOfNextMonth));
-  const gridMonthBars = buildSortedBars(buildEnergyTotals(bleGridItems, "grid_usage_watts", getMonthKey, getStartOfNextMonth));
-  const bydMonthBars = buildSortedBars(buildEnergyTotals(bydItems, "charging_rate_w_per_min", getMonthKey, getStartOfNextMonth));
+function combineBars(solarBars, gridBars, evBars) {
+  const map = new Map();
+  solarBars.forEach((item) => {
+    map.set(item.label, { label: item.label, solar: item.value, grid: 0, ev: 0 });
+  });
+  gridBars.forEach((item) => {
+    const existing = map.get(item.label) || { label: item.label, solar: 0, grid: 0, ev: 0 };
+    existing.grid = item.value;
+    map.set(item.label, existing);
+  });
+  evBars.forEach((item) => {
+    const existing = map.get(item.label) || { label: item.label, solar: 0, grid: 0, ev: 0 };
+    existing.ev = item.value;
+    map.set(item.label, existing);
+  });
+  return Array.from(map.values()).sort((left, right) => left.label.localeCompare(right.label));
+}
 
-  function combineBars(solarBars, gridBars, evBars) {
-    const map = new Map();
-    solarBars.forEach((item) => {
-      map.set(item.label, { label: item.label, solar: item.value, grid: 0, ev: 0 });
-    });
-    gridBars.forEach((item) => {
-      const existing = map.get(item.label) || { label: item.label, solar: 0, grid: 0, ev: 0 };
-      existing.grid = item.value;
-      map.set(item.label, existing);
-    });
-    evBars.forEach((item) => {
-      const existing = map.get(item.label) || { label: item.label, solar: 0, grid: 0, ev: 0 };
-      existing.ev = item.value;
-      map.set(item.label, existing);
-    });
-    return Array.from(map.values()).sort((left, right) => left.label.localeCompare(right.label));
-  }
 
-  renderEnergyBars(hourlyChartElement, "hourly-bars", "Hourly cumulative split", combineBars(solarHourBars, gridHourBars, bydHourBars));
-  renderEnergyBars(weeklyChartElement, "weekly-bars", "Weekly cumulative split", combineBars(solarWeekBars, gridWeekBars, bydWeekBars));
-  renderEnergyBars(monthlyChartElement, "monthly-bars", "Monthly cumulative split", combineBars(solarMonthBars, gridMonthBars, bydMonthBars));
+function renderEnergyBreakdowns(summaryData) {
+  renderEnergyBars(hourlyChartElement, "hourly-bars", "Hourly cumulative split", combineBars(summaryData.hourly.solar, summaryData.hourly.grid, summaryData.hourly.ev));
+  renderEnergyBars(weeklyChartElement, "weekly-bars", "Weekly cumulative split", combineBars(summaryData.weekly.solar, summaryData.weekly.grid, summaryData.weekly.ev));
+  renderEnergyBars(monthlyChartElement, "monthly-bars", "Monthly cumulative split", combineBars(summaryData.monthly.solar, summaryData.monthly.grid, summaryData.monthly.ev));
 }
 
 
@@ -1345,10 +1449,7 @@ function createBarChart(element, labels, datasets) {
     renderChartPlaceholder(element, "Chart library unavailable");
     return;
   }
-  const hasVisibleData = datasets.some((dataset) =>
-    Array.isArray(dataset.data) && dataset.data.some((value) => Number.isFinite(Number(value)) && Number(value) !== 0)
-  );
-  if (!labels.length || !hasVisibleData) {
+  if (!labels.length) {
     renderChartPlaceholder(element, "No bar data in the selected window");
     return;
   }
@@ -1411,11 +1512,12 @@ function resizeCharts() {
   lightweightCharts.forEach((chart) => chart.resize());
 }
 
-function renderDashboardCharts(items) {
+function renderDashboardCharts(items, windowState) {
   try {
+    const summaryData = buildSummaryData(items, windowState);
     renderBleSolarChart(items);
-    renderCumulativeChart(items);
-    renderEnergyBreakdowns(items);
+    renderCumulativeChart(summaryData);
+    renderEnergyBreakdowns(summaryData);
     return true;
   } catch (error) {
     console.error("Chart render failed", error);
@@ -1502,19 +1604,11 @@ function renderBleSolarChart(items) {
   ], "rate");
 }
 
-function renderCumulativeChart(items) {
+function renderCumulativeChart(summaryData) {
   const dark = getTheme() === "dark";
-  const solarItems = items
-    .filter((item) => item.source === "local_site" && item.solar_generation_watts !== null)
-    .sort((left, right) => new Date(left.observed_at) - new Date(right.observed_at));
-  const bleGridItems = items
-    .filter((item) => item.source === "ble" && item.grid_usage_watts !== null)
-    .sort((left, right) => new Date(left.observed_at) - new Date(right.observed_at));
-  const evItems = getBydPowerSeries(items);
-
-  const solarKwh = integrateSeriesKwh(solarItems, "solar_generation_watts");
-  const gridKwh = integrateSeriesKwh(bleGridItems, "grid_usage_watts");
-  const evKwh = integrateSeriesKwh(evItems, "charging_rate_w_per_min");
+  const solarKwh = summaryData.cumulative.solar;
+  const gridKwh = summaryData.cumulative.grid;
+  const evKwh = summaryData.cumulative.ev;
 
   createLineChart(cumulativeChartElement, [
     {
@@ -1566,7 +1660,7 @@ async function refresh() {
       ensureStartInputs();
       const selectedDate = startDateInput.value;
       const selectedTime = startTimeInput.value || "00:00";
-      const start = buildLocalDateTime(selectedDate, selectedTime);
+      const start = buildAppDateTime(selectedDate, selectedTime);
       safeStart = Number.isNaN(start.getTime()) ? getDefaultStartDateTime(hours) : start;
     } else {
       safeStart = getDefaultStartDateTime(hours);
@@ -1574,6 +1668,7 @@ async function refresh() {
       persistDateTimeControls();
     }
     const end = new Date(safeStart.getTime() + hours * 3600000);
+    const windowState = buildWindowState(safeStart, end);
     const [statusResponse, samplesResponse] = await Promise.all([
       fetch("/api/status"),
       fetch(`/api/samples?hours=${hours}&start=${encodeURIComponent(safeStart.toISOString())}&end=${encodeURIComponent(end.toISOString())}`)
@@ -1610,7 +1705,7 @@ async function refresh() {
     }
 
     renderCumulativeStats(items, statusPayload.pollers);
-    const chartsRendered = renderDashboardCharts(items);
+    const chartsRendered = renderDashboardCharts(items, windowState);
     refreshText.textContent = chartsRendered
       ? `Updated ${new Date().toLocaleTimeString("en-AU", { timeZone: appTimezone })}`
       : "Updated with chart fallback";
