@@ -1296,6 +1296,13 @@ function createLineChart(element, datasets, tooltipMode = "rate") {
 }
 
 function createBarChart(element, labels, datasets) {
+  const hasVisibleData = datasets.some((dataset) =>
+    Array.isArray(dataset.data) && dataset.data.some((value) => Number.isFinite(Number(value)) && Number(value) !== 0)
+  );
+  if (!labels.length || !hasVisibleData) {
+    renderChartPlaceholder(element, "No bar data in the selected window");
+    return;
+  }
   const theme = buildCanvasTheme();
   const canvas = ensureChartCanvas(element);
   const chart = new Chart(canvas, {
@@ -1305,6 +1312,7 @@ function createBarChart(element, labels, datasets) {
       ...baseChartOptions(theme),
       scales: {
         x: {
+          type: "category",
           stacked: false,
           grid: {
             color: "rgba(0,0,0,0)"
@@ -1361,17 +1369,26 @@ function renderEnergyBars(element, chartKey, title, bars) {
     {
       label: "BLE grid",
       data: bars.map((item) => item.grid),
-      backgroundColor: dark ? "#7fb0ff" : "#6f96d8"
+      backgroundColor: dark ? "#7fb0ff" : "#6f96d8",
+      borderRadius: 4,
+      barPercentage: 0.9,
+      categoryPercentage: 0.72
     },
     {
       label: "Site solar",
       data: bars.map((item) => item.solar),
-      backgroundColor: dark ? "#8ee29d" : "#7cc98a"
+      backgroundColor: dark ? "#8ee29d" : "#7cc98a",
+      borderRadius: 4,
+      barPercentage: 0.9,
+      categoryPercentage: 0.72
     },
     {
       label: "BYD EV",
       data: bars.map((item) => item.ev),
-      backgroundColor: dark ? "#ffb45b" : "#d6882e"
+      backgroundColor: dark ? "#ffb45b" : "#d6882e",
+      borderRadius: 4,
+      barPercentage: 0.9,
+      categoryPercentage: 0.72
     }
   ]);
 }
