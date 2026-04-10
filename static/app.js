@@ -112,6 +112,21 @@ function clampHours(value) {
   return Math.min(168, Math.max(1, Math.round(numeric)));
 }
 
+function getRangeMode() {
+  return uiState.controls && uiState.controls.rangeMode === "fixed" ? "fixed" : "live";
+}
+
+function isFixedRange() {
+  return getRangeMode() === "fixed";
+}
+
+function setRangeMode(mode) {
+  updateUiState((state) => {
+    state.controls = state.controls || {};
+    state.controls.rangeMode = mode === "fixed" ? "fixed" : "live";
+  });
+}
+
 function syncWindowControls(hours) {
   const clampedHours = clampHours(hours);
   hoursInput.value = clampedHours;
@@ -128,15 +143,24 @@ function syncWindowControls(hours) {
 
 function getDefaultStartDateTime(hours) {
   const clampedHours = clampHours(hours);
-  const end = new Date(Date.now() + 3600000);
+  const end = new Date();
   end.setSeconds(0, 0);
   return new Date(end.getTime() - clampedHours * 3600000);
 }
 
+function formatLocalTime(date) {
+  const parts = getZonedParts(date);
+  return `${parts.hour}:${parts.minute}`;
+}
+
+function syncDisplayedStart(date) {
+  startDateInput.value = formatLocalDate(date);
+  startTimeInput.value = formatLocalTime(date);
+}
+
 function applyDefaultStartDateTime(hours) {
   const start = getDefaultStartDateTime(hours);
-  startDateInput.value = formatLocalDate(start);
-  startTimeInput.value = `${String(start.getHours()).padStart(2, "0")}:${String(start.getMinutes()).padStart(2, "0")}`;
+  syncDisplayedStart(start);
   persistDateTimeControls();
 }
 
@@ -199,14 +223,14 @@ function formatRatePerMinute(value) {
   if (value === null || value === undefined || Number.isNaN(value)) {
     return "n/a";
   }
-  return `${Number(value).toFixed(1)} W/min`;
+  return `${Number(value).toFixed(1)} W`;
 }
 
 function formatKwPerHour(value) {
   if (value === null || value === undefined || Number.isNaN(value)) {
     return "n/a";
   }
-  return `${ratePerMinuteToKwPerHour(value).toFixed(3)} kW/hr`;
+  return `${ratePerMinuteToKwPerHour(value).toFixed(3)} kW`;
 }
 
 function formatWatts(value) {
@@ -228,7 +252,7 @@ function ratePerMinuteToKwh(ratePerMinute, deltaMinutes) {
 }
 
 function ratePerMinuteToKwPerHour(value) {
-  return (Number(value) * 60) / 1000;
+  return Number(value) / 1000;
 }
 
 function wattsToKw(value) {
@@ -357,15 +381,15 @@ function toChartTime(dateLike) {
 }
 
 function getAxisTitleRate() {
-  return "kW/hr";
+  return "kW";
 }
 
 function getAxisTitleSubRate() {
-  return "W/min";
+  return "W";
 }
 
 function buildRateHoverTemplate(label) {
-  return `<b>${label}</b><br>%{x}<br>%{y:.3f} kW/hr<br>%{customdata:.1f} W/min<extra></extra>`;
+  return `<b>${label}</b><br>%{x}<br>%{y:.3f} kW<br>%{customdata:.1f} W<extra></extra>`;
 }
 
 function buildPowerHoverTemplate(label) {
@@ -1288,7 +1312,7 @@ function createLineChart(element, datasets, tooltipMode = "rate") {
           title: {
             display: true,
             color: theme.muted,
-            text: tooltipMode === "energy" ? "kWh" : "kW/hr"
+            text: tooltipMode === "energy" ? "kWh" : "kW"
           }
         }
       },
@@ -1306,7 +1330,7 @@ function createLineChart(element, datasets, tooltipMode = "rate") {
                 return `${context.dataset.label}: ${Number(context.raw.y || 0).toFixed(3)} kWh`;
               }
               const rawRate = context.raw.raw;
-              return `${context.dataset.label}: ${Number(context.raw.y || 0).toFixed(3)} kW/hr (${Number(rawRate || 0).toFixed(1)} W/min)`;
+              return `${context.dataset.label}: ${Number(context.raw.y || 0).toFixed(3)} kW (${Number(rawRate || 0).toFixed(1)} W)`;
             }
           }
         }
@@ -1536,12 +1560,19 @@ function renderEmptyCharts() {
 
 async function refresh() {
   try {
-    ensureStartInputs();
     const hours = syncWindowControls(hoursInput.value || window.SOLAR_MONITOR_CONFIG.defaultHours || 24);
-    const selectedDate = startDateInput.value;
-    const selectedTime = startTimeInput.value || "00:00";
-    const start = buildLocalDateTime(selectedDate, selectedTime);
-    const safeStart = Number.isNaN(start.getTime()) ? new Date() : start;
+    let safeStart;
+    if (isFixedRange()) {
+      ensureStartInputs();
+      const selectedDate = startDateInput.value;
+      const selectedTime = startTimeInput.value || "00:00";
+      const start = buildLocalDateTime(selectedDate, selectedTime);
+      safeStart = Number.isNaN(start.getTime()) ? getDefaultStartDateTime(hours) : start;
+    } else {
+      safeStart = getDefaultStartDateTime(hours);
+      syncDisplayedStart(safeStart);
+      persistDateTimeControls();
+    }
     const end = new Date(safeStart.getTime() + hours * 3600000);
     const [statusResponse, samplesResponse] = await Promise.all([
       fetch("/api/status"),
@@ -1609,15 +1640,19 @@ function scheduleRefresh(delay = 150) {
 
 const storedTheme = localStorage.getItem("solar-monitor-theme");
 setTheme(storedTheme || "light");
-if (uiState.controls && uiState.controls.startDate) {
+if (isFixedRange() && uiState.controls && uiState.controls.startDate) {
   startDateInput.value = uiState.controls.startDate;
 }
-if (uiState.controls && uiState.controls.startTime) {
+if (isFixedRange() && uiState.controls && uiState.controls.startTime) {
   startTimeInput.value = uiState.controls.startTime;
 }
-ensureStartInputs();
 syncWindowControls((uiState.controls && uiState.controls.hours) || window.SOLAR_MONITOR_CONFIG.defaultHours || 24);
-persistDateTimeControls();
+if (isFixedRange()) {
+  ensureStartInputs();
+  persistDateTimeControls();
+} else {
+  applyDefaultStartDateTime(hoursInput.value || window.SOLAR_MONITOR_CONFIG.defaultHours || 24);
+}
 bindStatusCardPersistence();
 
 themeToggle.addEventListener("click", () => {
@@ -1629,31 +1664,43 @@ themeToggle.addEventListener("click", () => {
 windowPreset.addEventListener("change", () => {
   if (windowPreset.value !== "custom") {
     syncWindowControls(windowPreset.value);
+    if (!isFixedRange()) {
+      applyDefaultStartDateTime(windowPreset.value);
+    }
     scheduleRefresh(0);
   }
 });
 
 hoursInput.addEventListener("input", () => {
   syncWindowControls(hoursInput.value);
+  if (!isFixedRange()) {
+    applyDefaultStartDateTime(hoursInput.value);
+  }
   scheduleRefresh(200);
 });
 hoursInput.addEventListener("change", () => {
   syncWindowControls(hoursInput.value);
+  if (!isFixedRange()) {
+    applyDefaultStartDateTime(hoursInput.value);
+  }
   scheduleRefresh(0);
 });
 
 [startDateInput, startTimeInput].forEach((input) => {
   input.addEventListener("input", () => {
+    setRangeMode("fixed");
     persistDateTimeControls();
     scheduleRefresh(200);
   });
   input.addEventListener("change", () => {
+    setRangeMode("fixed");
     persistDateTimeControls();
     scheduleRefresh(0);
   });
 });
 
 resetRangeButton.addEventListener("click", () => {
+  setRangeMode("live");
   applyDefaultStartDateTime(hoursInput.value || window.SOLAR_MONITOR_CONFIG.defaultHours || 24);
   resetStoredChartState();
   scheduleRefresh(0);
