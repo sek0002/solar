@@ -1510,6 +1510,351 @@ function renderEmptyCharts() {
   emptyEnergyChart(monthlyChartElement, "monthly-bars", "Monthly cumulative split");
 }
 
+const lightweightCharts = new Map();
+
+function getChartInstance(element) {
+  return lightweightCharts.get(element) || null;
+}
+
+function clearChartElement(element) {
+  const existing = getChartInstance(element);
+  if (existing) {
+    existing.destroy();
+    lightweightCharts.delete(element);
+  }
+  if (element) {
+    element.innerHTML = "";
+  }
+}
+
+function ensureChartCanvas(element) {
+  clearChartElement(element);
+  const canvas = document.createElement("canvas");
+  canvas.setAttribute("aria-label", element.id || "chart");
+  element.appendChild(canvas);
+  return canvas;
+}
+
+function buildCanvasTheme() {
+  const dark = getTheme() === "dark";
+  return {
+    dark,
+    text: dark ? "#edf4ff" : "#263445",
+    muted: dark ? "#97abc5" : "#7a8797",
+    grid: dark ? "rgba(124, 147, 180, 0.14)" : "rgba(164, 179, 201, 0.16)",
+    gridStrong: dark ? "rgba(124, 147, 180, 0.28)" : "rgba(164, 179, 201, 0.28)",
+    panel: dark ? "#132134" : "#ffffff"
+  };
+}
+
+function formatChartTimeLabel(epochMs) {
+  const date = new Date(epochMs);
+  return date.toLocaleTimeString("en-AU", {
+    timeZone: appTimezone,
+    hour: "2-digit",
+    minute: "2-digit"
+  });
+}
+
+function formatChartDateTimeLabel(epochMs) {
+  const date = new Date(epochMs);
+  return date.toLocaleString("en-AU", {
+    timeZone: appTimezone,
+    day: "2-digit",
+    month: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit"
+  });
+}
+
+function baseChartOptions(theme) {
+  return {
+    responsive: true,
+    maintainAspectRatio: false,
+    animation: false,
+    normalized: true,
+    parsing: false,
+    interaction: {
+      mode: "nearest",
+      intersect: false
+    },
+    elements: {
+      point: {
+        radius: 0,
+        hitRadius: 8,
+        hoverRadius: 3
+      },
+      line: {
+        tension: 0
+      }
+    },
+    plugins: {
+      legend: {
+        labels: {
+          color: theme.muted,
+          boxWidth: 10,
+          boxHeight: 10,
+          usePointStyle: false
+        }
+      },
+      tooltip: {
+        backgroundColor: theme.dark ? "rgba(13, 22, 35, 0.96)" : "rgba(255,255,255,0.95)",
+        borderColor: theme.dark ? "rgba(135, 156, 186, 0.22)" : "rgba(120, 132, 155, 0.22)",
+        borderWidth: 1,
+        titleColor: theme.text,
+        bodyColor: theme.text
+      }
+    }
+  };
+}
+
+function createLineChart(element, datasets, tooltipMode = "rate") {
+  const theme = buildCanvasTheme();
+  const canvas = ensureChartCanvas(element);
+  const chart = new Chart(canvas, {
+    type: "line",
+    data: { datasets },
+    options: {
+      ...baseChartOptions(theme),
+      interaction: {
+        mode: "index",
+        intersect: false
+      },
+      scales: {
+        x: {
+          type: "linear",
+          grid: {
+            color: theme.grid
+          },
+          ticks: {
+            color: theme.muted,
+            maxTicksLimit: 7,
+            callback: (value) => formatChartTimeLabel(value)
+          }
+        },
+        y: {
+          beginAtZero: true,
+          grid: {
+            color: theme.grid
+          },
+          ticks: {
+            color: theme.muted
+          },
+          title: {
+            display: true,
+            color: theme.muted,
+            text: tooltipMode === "energy" ? "kWh" : "kW/hr"
+          }
+        }
+      },
+      plugins: {
+        ...baseChartOptions(theme).plugins,
+        tooltip: {
+          ...baseChartOptions(theme).plugins.tooltip,
+          callbacks: {
+            title: (items) => {
+              const point = items && items[0] ? items[0].raw : null;
+              return point ? formatChartDateTimeLabel(point.x) : "";
+            },
+            label: (context) => {
+              if (tooltipMode === "energy") {
+                return `${context.dataset.label}: ${Number(context.raw.y || 0).toFixed(3)} kWh`;
+              }
+              const rawRate = context.raw.raw;
+              return `${context.dataset.label}: ${Number(context.raw.y || 0).toFixed(3)} kW/hr (${Number(rawRate || 0).toFixed(1)} W/min)`;
+            }
+          }
+        }
+      }
+    }
+  });
+  lightweightCharts.set(element, chart);
+}
+
+function createBarChart(element, labels, datasets) {
+  const theme = buildCanvasTheme();
+  const canvas = ensureChartCanvas(element);
+  const chart = new Chart(canvas, {
+    type: "bar",
+    data: { labels, datasets },
+    options: {
+      ...baseChartOptions(theme),
+      scales: {
+        x: {
+          stacked: false,
+          grid: {
+            color: "rgba(0,0,0,0)"
+          },
+          ticks: {
+            color: theme.muted,
+            maxRotation: 0,
+            autoSkip: true,
+            maxTicksLimit: 8
+          }
+        },
+        y: {
+          beginAtZero: true,
+          grid: {
+            color: theme.grid
+          },
+          ticks: {
+            color: theme.muted
+          },
+          title: {
+            display: true,
+            color: theme.muted,
+            text: "kWh"
+          }
+        }
+      },
+      plugins: {
+        ...baseChartOptions(theme).plugins,
+        tooltip: {
+          ...baseChartOptions(theme).plugins.tooltip,
+          callbacks: {
+            label: (context) => `${context.dataset.label}: ${Number(context.raw || 0).toFixed(3)} kWh`
+          }
+        }
+      }
+    }
+  });
+  lightweightCharts.set(element, chart);
+}
+
+function renderChartPlaceholder(element, message) {
+  clearChartElement(element);
+  element.innerHTML = `<div class="chart-empty-state">${message}</div>`;
+}
+
+function resizeCharts() {
+  lightweightCharts.forEach((chart) => chart.resize());
+}
+
+function renderEnergyBars(element, chartKey, title, bars) {
+  const dark = getTheme() === "dark";
+  const labels = bars.map((item) => item.label);
+  createBarChart(element, labels, [
+    {
+      label: "BLE grid",
+      data: bars.map((item) => item.grid),
+      backgroundColor: dark ? "#7fb0ff" : "#6f96d8"
+    },
+    {
+      label: "Site solar",
+      data: bars.map((item) => item.solar),
+      backgroundColor: dark ? "#8ee29d" : "#7cc98a"
+    },
+    {
+      label: "BYD EV",
+      data: bars.map((item) => item.ev),
+      backgroundColor: dark ? "#ffb45b" : "#d6882e"
+    }
+  ]);
+}
+
+function renderBleSolarChart(items) {
+  const dark = getTheme() === "dark";
+  const bleGrid = items
+    .filter((item) => item.source === "ble" && item.grid_usage_watts !== null)
+    .sort((left, right) => new Date(left.observed_at) - new Date(right.observed_at));
+  const siteSolar = items
+    .filter((item) => item.source === "local_site" && item.solar_generation_watts !== null)
+    .sort((left, right) => new Date(left.observed_at) - new Date(right.observed_at));
+  const evItems = getBydPowerSeries(items);
+
+  createLineChart(bleChartElement, [
+    {
+      label: "BLE grid",
+      data: bleGrid.map((item) => ({
+        x: toChartTime(item.observed_at).getTime(),
+        y: ratePerMinuteToKwPerHour(item.grid_usage_watts),
+        raw: Number(item.grid_usage_watts)
+      })),
+      borderColor: dark ? "#7fb0ff" : "#6f96d8",
+      backgroundColor: dark ? "rgba(127, 176, 255, 0.16)" : "rgba(111, 150, 216, 0.17)",
+      fill: true
+    },
+    {
+      label: "Site solar",
+      data: siteSolar.map((item) => ({
+        x: toChartTime(item.observed_at).getTime(),
+        y: ratePerMinuteToKwPerHour(item.solar_generation_watts),
+        raw: Number(item.solar_generation_watts)
+      })),
+      borderColor: dark ? "#8ee29d" : "#7cc98a",
+      backgroundColor: dark ? "rgba(142, 226, 157, 0.12)" : "rgba(124, 201, 138, 0.12)",
+      fill: true
+    },
+    {
+      label: "BYD EV",
+      data: evItems.map((item) => ({
+        x: toChartTime(item.observed_at).getTime(),
+        y: ratePerMinuteToKwPerHour(item.charging_rate_w_per_min),
+        raw: Number(item.charging_rate_w_per_min)
+      })),
+      borderColor: dark ? "#ffb45b" : "#d6882e",
+      backgroundColor: "rgba(0,0,0,0)",
+      fill: false
+    }
+  ], "rate");
+}
+
+function renderCumulativeChart(items) {
+  const dark = getTheme() === "dark";
+  const solarItems = items
+    .filter((item) => item.source === "local_site" && item.solar_generation_watts !== null)
+    .sort((left, right) => new Date(left.observed_at) - new Date(right.observed_at));
+  const bleGridItems = items
+    .filter((item) => item.source === "ble" && item.grid_usage_watts !== null)
+    .sort((left, right) => new Date(left.observed_at) - new Date(right.observed_at));
+  const evItems = getBydPowerSeries(items);
+
+  const solarKwh = integrateSeriesKwh(solarItems, "solar_generation_watts");
+  const gridKwh = integrateSeriesKwh(bleGridItems, "grid_usage_watts");
+  const evKwh = integrateSeriesKwh(evItems, "charging_rate_w_per_min");
+
+  createLineChart(cumulativeChartElement, [
+    {
+      label: "Site solar cumulative",
+      data: solarKwh.map((item) => ({
+        x: toChartTime(item.observed_at).getTime(),
+        y: item.cumulative_kwh
+      })),
+      borderColor: dark ? "#8ee29d" : "#7cc98a",
+      backgroundColor: dark ? "rgba(142, 226, 157, 0.14)" : "rgba(124, 201, 138, 0.12)",
+      fill: true
+    },
+    {
+      label: "BLE grid cumulative",
+      data: gridKwh.map((item) => ({
+        x: toChartTime(item.observed_at).getTime(),
+        y: item.cumulative_kwh
+      })),
+      borderColor: dark ? "#7fb0ff" : "#6f96d8",
+      backgroundColor: dark ? "rgba(127, 176, 255, 0.12)" : "rgba(111, 150, 216, 0.09)",
+      fill: true
+    },
+    {
+      label: "BYD EV cumulative",
+      data: evKwh.map((item) => ({
+        x: toChartTime(item.observed_at).getTime(),
+        y: item.cumulative_kwh
+      })),
+      borderColor: dark ? "#ffb45b" : "#d6882e",
+      backgroundColor: dark ? "rgba(255, 180, 91, 0.12)" : "rgba(214, 136, 46, 0.10)",
+      fill: true
+    }
+  ], "energy");
+}
+
+function renderEmptyCharts() {
+  renderChartPlaceholder(bleChartElement, "No data in the selected window");
+  renderChartPlaceholder(cumulativeChartElement, "No cumulative data in the selected window");
+  renderChartPlaceholder(hourlyChartElement, "No hourly data in the selected window");
+  renderChartPlaceholder(weeklyChartElement, "No weekly data in the selected window");
+  renderChartPlaceholder(monthlyChartElement, "No monthly data in the selected window");
+}
+
 async function refresh() {
   try {
     ensureStartInputs();
