@@ -1250,6 +1250,10 @@ function baseChartOptions(theme) {
 }
 
 function createLineChart(element, datasets, tooltipMode = "rate") {
+  if (typeof Chart === "undefined") {
+    renderChartPlaceholder(element, "Chart library unavailable");
+    return;
+  }
   const theme = buildCanvasTheme();
   const canvas = ensureChartCanvas(element);
   const chart = new Chart(canvas, {
@@ -1313,6 +1317,10 @@ function createLineChart(element, datasets, tooltipMode = "rate") {
 }
 
 function createBarChart(element, labels, datasets) {
+  if (typeof Chart === "undefined") {
+    renderChartPlaceholder(element, "Chart library unavailable");
+    return;
+  }
   const hasVisibleData = datasets.some((dataset) =>
     Array.isArray(dataset.data) && dataset.data.some((value) => Number.isFinite(Number(value)) && Number(value) !== 0)
   );
@@ -1377,6 +1385,19 @@ function renderChartPlaceholder(element, message) {
 
 function resizeCharts() {
   lightweightCharts.forEach((chart) => chart.resize());
+}
+
+function renderDashboardCharts(items) {
+  try {
+    renderBleSolarChart(items);
+    renderCumulativeChart(items);
+    renderEnergyBreakdowns(items);
+    return true;
+  } catch (error) {
+    console.error("Chart render failed", error);
+    renderEmptyCharts();
+    return false;
+  }
 }
 
 function renderEnergyBars(element, chartKey, title, bars) {
@@ -1558,10 +1579,10 @@ async function refresh() {
     }
 
     renderCumulativeStats(items, statusPayload.pollers);
-    renderBleSolarChart(items);
-    renderCumulativeChart(items);
-    renderEnergyBreakdowns(items);
-    refreshText.textContent = `Updated ${new Date().toLocaleTimeString("en-AU", { timeZone: appTimezone })}`;
+    const chartsRendered = renderDashboardCharts(items);
+    refreshText.textContent = chartsRendered
+      ? `Updated ${new Date().toLocaleTimeString("en-AU", { timeZone: appTimezone })}`
+      : "Updated with chart fallback";
   } catch (error) {
     console.error("Refresh failed", error);
     renderEmptyCharts();
