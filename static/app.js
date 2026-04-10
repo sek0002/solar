@@ -423,18 +423,23 @@ function getBydPowerWatts(item) {
   return null;
 }
 
-function getBydChargingRate(item) {
+function getBydVehicleSpeedKph(item) {
   const payload = item && item.raw_payload ? item.raw_payload : {};
   const realtime = payload && payload.realtime ? payload.realtime : {};
   const vehicle = payload && payload.vehicle ? payload.vehicle : {};
-  const vehicleSpeedKph = Number(
-    payload.vehicle_speed_kph ??
-    realtime.speed ??
-    realtime.speedKmH ??
-    realtime.speedKmh ??
-    realtime.vehicleSpeed ??
-    vehicle.speed
-  );
+  const candidate = payload.vehicle_speed_kph
+    ?? realtime.speed
+    ?? realtime.speedKmH
+    ?? realtime.speedKmh
+    ?? realtime.vehicleSpeed
+    ?? vehicle.speed;
+  const numeric = Number(candidate);
+  return Number.isFinite(numeric) ? numeric : null;
+}
+
+function getBydChargingRate(item) {
+  const payload = item && item.raw_payload ? item.raw_payload : {};
+  const vehicleSpeedKph = getBydVehicleSpeedKph(item);
   if (Number.isFinite(vehicleSpeedKph) && vehicleSpeedKph > 0) {
     return 0;
   }
@@ -454,15 +459,29 @@ function getBydChargingRate(item) {
 }
 
 function getBydPowerSeries(items) {
-  return items
+  const movementWindowMs = 2 * 60 * 1000;
+  const bydItems = items
     .filter((item) => item.source === "byd_ev")
+    .sort((left, right) => new Date(left.observed_at) - new Date(right.observed_at));
+  const movingEpochs = bydItems
+    .filter((item) => {
+      const speedKph = getBydVehicleSpeedKph(item);
+      return speedKph !== null && speedKph > 0;
+    })
+    .map((item) => new Date(item.observed_at).getTime())
+    .filter((timestamp) => Number.isFinite(timestamp));
+
+  return bydItems
     .map((item) => ({
       ...item,
+      movement_suppressed: movingEpochs.some((movingEpoch) => Math.abs(new Date(item.observed_at).getTime() - movingEpoch) <= movementWindowMs),
       power_w: getBydPowerWatts(item),
       charging_rate_w_per_min: getBydChargingRate(item)
     }))
+    .map((item) => item.movement_suppressed
+      ? { ...item, power_w: 0, charging_rate_w_per_min: 0 }
+      : item)
     .filter((item) => item.charging_rate_w_per_min !== null)
-    .sort((left, right) => new Date(left.observed_at) - new Date(right.observed_at));
 }
 
 function getChartHeight() {
