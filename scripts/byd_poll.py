@@ -184,6 +184,17 @@ def main() -> int:
     soc_percent = _pick_first(vehicle_info.get("elecPercent"), vehicle_info.get("powerBattery"))
     range_km = _pick_first(vehicle_info.get("enduranceMileage"), vehicle_info.get("evEndurance"))
     charge_state = _pick_first(vehicle_info.get("chargingState"), vehicle_info.get("chargeState"))
+    vehicle_speed_kph = _as_float(
+        _pick_first(
+            vehicle_info.get("speed"),
+            vehicle_info.get("speedKmH"),
+            vehicle_info.get("speedKmh"),
+            vehicle_info.get("speedkmh"),
+            vehicle_info.get("vehicleSpeed"),
+            data.get("speed"),
+            (vehicle or {}).get("speed"),
+        )
+    )
     gl_w = _as_float(_pick_first(vehicle_info.get("gl"), data.get("gl"), (vehicle or {}).get("gl")))
     total_power_w = _as_float(
         _pick_first(vehicle_info.get("totalPower"), data.get("totalPower"), (vehicle or {}).get("totalPower"))
@@ -212,6 +223,7 @@ def main() -> int:
         "brand_name": _pick_first((vehicle or {}).get("brandName"), vehicle_info.get("brandName")),
         "soc_percent": _as_float(soc_percent),
         "range_km": _as_float(range_km),
+        "vehicle_speed_kph": vehicle_speed_kph,
         "charging_state": charge_state,
         "is_charging": is_charging,
         "is_connected": is_connected,

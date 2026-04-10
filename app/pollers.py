@@ -1161,9 +1161,14 @@ class BydEvPoller:
         if power_w in (None, ""):
             power_w = payload.get("total_power_w")
         raw_power_w = float(power_w) if power_w is not None else None
+        vehicle_speed_kph = payload.get("vehicle_speed_kph")
+        numeric_speed_kph = float(vehicle_speed_kph) if vehicle_speed_kph not in (None, "") else None
         tracked_power_w = max(0.0, raw_power_w) if raw_power_w is not None else 0.0
+        if numeric_speed_kph is not None and numeric_speed_kph > 0:
+            tracked_power_w = 0.0
         charging_rate_w_per_min = tracked_power_w / 60.0
         payload["power_w"] = raw_power_w
+        payload["vehicle_speed_kph"] = numeric_speed_kph
         payload["tracked_power_w"] = tracked_power_w
         payload["ev_charging_rate_w_per_min"] = charging_rate_w_per_min
         return payload

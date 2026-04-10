@@ -390,6 +390,17 @@ function getBydPowerWatts(item) {
     const numeric = Number(normalized);
     return Number.isFinite(numeric) ? numeric : null;
   };
+  const vehicleSpeedKph = normalizeNumber(
+    payload.vehicle_speed_kph ??
+    realtime.speed ??
+    realtime.speedKmH ??
+    realtime.speedKmh ??
+    realtime.vehicleSpeed ??
+    vehicle.speed
+  );
+  if (vehicleSpeedKph !== null && vehicleSpeedKph > 0) {
+    return 0;
+  }
   const candidates = [
     payload.tracked_power_w,
     flatGl,
@@ -414,6 +425,19 @@ function getBydPowerWatts(item) {
 
 function getBydChargingRate(item) {
   const payload = item && item.raw_payload ? item.raw_payload : {};
+  const realtime = payload && payload.realtime ? payload.realtime : {};
+  const vehicle = payload && payload.vehicle ? payload.vehicle : {};
+  const vehicleSpeedKph = Number(
+    payload.vehicle_speed_kph ??
+    realtime.speed ??
+    realtime.speedKmH ??
+    realtime.speedKmh ??
+    realtime.vehicleSpeed ??
+    vehicle.speed
+  );
+  if (Number.isFinite(vehicleSpeedKph) && vehicleSpeedKph > 0) {
+    return 0;
+  }
   const candidates = [
     payload.ev_charging_rate_w_per_min,
     item && item.grid_usage_watts,
