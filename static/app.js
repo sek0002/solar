@@ -26,6 +26,23 @@ const weeklyChartElement = document.querySelector("#weekly-chart");
 const monthlyChartElement = document.querySelector("#monthly-chart");
 const appTimezone = window.SOLAR_MONITOR_CONFIG.timezoneName || "Australia/Melbourne";
 const uiStateKey = "solar-monitor-ui-state";
+const appCacheVersionKey = "solar-monitor-cache-version";
+const appCacheVersion = (window.SOLAR_PWA && window.SOLAR_PWA.appVersion) || "dev";
+
+function resetVersionedClientCache() {
+  localStorage.removeItem(uiStateKey);
+  if ("caches" in window) {
+    caches.keys()
+      .then((keys) => Promise.all(keys.map((key) => caches.delete(key))))
+      .catch((error) => console.warn("Unable to clear cached assets", error));
+  }
+}
+
+const storedCacheVersion = localStorage.getItem(appCacheVersionKey);
+if (storedCacheVersion !== appCacheVersion) {
+  resetVersionedClientCache();
+  localStorage.setItem(appCacheVersionKey, appCacheVersion);
+}
 
 function loadUiState() {
   try {

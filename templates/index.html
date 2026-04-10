@@ -254,7 +254,8 @@
   </script>
   <script>
     window.SOLAR_PWA = {
-      swUrl: "/sw.js?v={{ sw_version }}"
+      swUrl: "/sw.js?v={{ sw_version }}",
+      appVersion: "{{ static_app_version }}-{{ styles_version }}-{{ sw_version }}"
     };
   </script>
   <script src="/static/app.js?v={{ static_app_version }}"></script>
