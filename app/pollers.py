@@ -631,6 +631,9 @@ class LocalSitePoller:
 
 
 class NetworkBlePoller:
+    STALE_ERROR_CODE = "NETWORK_BLE_STALE"
+    FETCH_ERROR_CODE = "NETWORK_BLE_FETCH_ERROR"
+
     def __init__(self, settings: Settings, database: Database, statuses: StatusRegistry) -> None:
         self.settings = settings
         self.database = database
@@ -652,10 +655,45 @@ class NetworkBlePoller:
 
                     response = await client.get(self.settings.network_ble_url)
                     response.raise_for_status()
-                    self._failure_started_at = None
 
                     payload = self._parse_response(response.text)
                     observed_at = datetime.now(timezone.utc)
+                    remote_observed_at = self._parse_remote_observed_at(payload.get("remote_observed_at"))
+
+                    if remote_observed_at is not None:
+                        stale_minutes = (observed_at - remote_observed_at).total_seconds() / 60.0
+                        if stale_minutes >= self.settings.ble_zero_after_minutes:
+                            error_message = (
+                                "Network BLE feed stale for {minutes:.1f} minutes".format(minutes=stale_minutes)
+                            )
+                            await self._record_error_fallback(
+                                error_message,
+                                error_code=self.STALE_ERROR_CODE,
+                                battery_percent=payload.get("battery_percent"),
+                                remote_observed_at=payload.get("remote_observed_at"),
+                                remote_state=payload.get("remote_state"),
+                                stale_minutes=stale_minutes,
+                                force_zero=True,
+                            )
+                            await self.statuses.update(
+                                "network_ble",
+                                state="error",
+                                error=error_message,
+                                details={
+                                    "url": self.settings.network_ble_url,
+                                    "error_code": self.STALE_ERROR_CODE,
+                                    "battery_percent": payload.get("battery_percent"),
+                                    "remote_observed_at": payload.get("remote_observed_at"),
+                                    "remote_state": payload.get("remote_state"),
+                                    "stale_minutes": round(stale_minutes, 2),
+                                    "zero_after_minutes": self.settings.ble_zero_after_minutes,
+                                    "latest_observed_at": observed_at.isoformat(),
+                                },
+                            )
+                            await asyncio.sleep(self.settings.network_ble_poll_seconds)
+                            continue
+
+                    self._failure_started_at = None
                     self.database.insert_sample(
                         source="ble",
                         observed_at=observed_at,
@@ -679,13 +717,14 @@ class NetworkBlePoller:
                 except httpx.HTTPError as exc:
                     if self._failure_started_at is None:
                         self._failure_started_at = datetime.now(timezone.utc)
-                    await self._record_error_fallback(str(exc))
+                    await self._record_error_fallback(str(exc), error_code=self.FETCH_ERROR_CODE)
                     await self.statuses.update(
                         "network_ble",
                         state="error",
                         error=str(exc),
                         details={
                             "url": self.settings.network_ble_url,
+                            "error_code": self.FETCH_ERROR_CODE,
                             "connection_failure_started_at": self._failure_started_at.isoformat(),
                         },
                     )
@@ -693,13 +732,14 @@ class NetworkBlePoller:
                     LOGGER.exception("Unexpected network BLE failure")
                     if self._failure_started_at is None:
                         self._failure_started_at = datetime.now(timezone.utc)
-                    await self._record_error_fallback(str(exc))
+                    await self._record_error_fallback(str(exc), error_code=self.FETCH_ERROR_CODE)
                     await self.statuses.update(
                         "network_ble",
                         state="error",
                         error=str(exc),
                         details={
                             "url": self.settings.network_ble_url,
+                            "error_code": self.FETCH_ERROR_CODE,
                             "connection_failure_started_at": self._failure_started_at.isoformat(),
                         },
                     )
@@ -709,10 +749,22 @@ class NetworkBlePoller:
     async def stop(self) -> None:
         self._stopped.set()
 
-    async def _record_error_fallback(self, error_message: str) -> None:
+    async def _record_error_fallback(
+        self,
+        error_message: str,
+        *,
+        error_code: str,
+        battery_percent: Optional[int] = None,
+        remote_observed_at: Optional[str] = None,
+        remote_state: Optional[str] = None,
+        stale_minutes: Optional[float] = None,
+        force_zero: bool = False,
+    ) -> None:
         observed_at = datetime.now(timezone.utc)
         use_zero_fallback = False
-        if self._failure_started_at is not None:
+        if force_zero:
+            use_zero_fallback = True
+        elif self._failure_started_at is not None:
             streak_minutes = (observed_at - self._failure_started_at).total_seconds() / 60.0
             use_zero_fallback = streak_minutes >= self.settings.ble_zero_after_minutes
 
@@ -725,11 +777,16 @@ class NetworkBlePoller:
             "grid_usage_watts": 0.0 if use_zero_fallback else (average_grid if average_grid is not None else 0.0),
             "url": self.settings.network_ble_url,
             "fallback_reason": error_message,
+            "error_code": error_code,
             "imputed": True,
             "average_window": self.settings.failure_average_window,
             "zero_after_minutes": self.settings.ble_zero_after_minutes,
             "used_zero_fallback": use_zero_fallback,
             "source_kind": "network_ble",
+            "battery_percent": battery_percent,
+            "remote_observed_at": remote_observed_at,
+            "remote_state": remote_state,
+            "stale_minutes": stale_minutes,
         }
         self.database.insert_sample(
             source="ble",
@@ -738,6 +795,19 @@ class NetworkBlePoller:
             solar_generation_watts=None,
             raw_payload=payload,
         )
+
+    @staticmethod
+    def _parse_remote_observed_at(observed_at_text: Optional[str]) -> Optional[datetime]:
+        if not observed_at_text:
+            return None
+        try:
+            parsed = datetime.fromisoformat(str(observed_at_text).replace("Z", "+00:00"))
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=timezone.utc)
+            return parsed.astimezone(timezone.utc)
+        except ValueError:
+            LOGGER.debug("Unable to parse network BLE remote_observed_at %r", observed_at_text)
+            return None
 
     def _parse_response(self, body_text: str) -> dict[str, Any]:
         lines = [line.strip() for line in body_text.splitlines()]
