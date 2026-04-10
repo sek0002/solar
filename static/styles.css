@@ -607,10 +607,7 @@ input[type="range"] {
 }
 
 #ble-chart,
-#cumulative-chart,
-#hourly-chart,
-#weekly-chart,
-#monthly-chart {
+#cumulative-chart {
   width: 100%;
   height: 300px;
   border-radius: 18px;
@@ -624,10 +621,7 @@ input[type="range"] {
 }
 
 #ble-chart canvas,
-#cumulative-chart canvas,
-#hourly-chart canvas,
-#weekly-chart canvas,
-#monthly-chart canvas {
+#cumulative-chart canvas {
   width: 100% !important;
   height: 100% !important;
   display: block;
@@ -645,9 +639,6 @@ input[type="range"] {
   background: color-mix(in srgb, var(--panel-strong) 92%, transparent);
 }
 
-#hourly-chart,
-#weekly-chart,
-#monthly-chart,
 #byd-summary-frame {
   height: 270px;
 }

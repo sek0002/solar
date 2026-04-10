@@ -21,13 +21,11 @@ const topbarBydSubvalue = document.querySelector("#topbar-byd-subvalue");
 const themeToggle = document.querySelector("#theme-toggle");
 const bleChartElement = document.querySelector("#ble-chart");
 const cumulativeChartElement = document.querySelector("#cumulative-chart");
-const hourlyChartElement = document.querySelector("#hourly-chart");
-const weeklyChartElement = document.querySelector("#weekly-chart");
-const monthlyChartElement = document.querySelector("#monthly-chart");
 const appTimezone = window.SOLAR_MONITOR_CONFIG.timezoneName || "Australia/Melbourne";
 const uiStateKey = "solar-monitor-ui-state";
 const appCacheVersionKey = "solar-monitor-cache-version";
 const appCacheVersion = (window.SOLAR_PWA && window.SOLAR_PWA.appVersion) || "dev";
+const pageLoadDefaultHours = 12;
 
 function resetVersionedClientCache() {
   localStorage.removeItem(uiStateKey);
@@ -1212,12 +1210,6 @@ function renderCumulativeStats(items, pollers = []) {
   `;
 }
 
-function buildSortedBars(totals) {
-  return Array.from(totals.entries())
-    .map(([label, value]) => ({ label, value }))
-    .sort((left, right) => left.label.localeCompare(right.label));
-}
-
 function getSeriesBySource(items) {
   return {
     solar: sortByObservedAt(items.filter((item) => item.source === "local_site" && item.solar_generation_watts !== null)),
@@ -1234,48 +1226,8 @@ function buildSummaryData(items, windowState) {
       solar: integrateSeriesKwh(series.solar, "solar_generation_watts", windowState),
       grid: integrateSeriesKwh(series.grid, "grid_usage_watts", windowState),
       ev: integrateSeriesKwh(series.ev, "charging_rate_w_per_min", windowState)
-    },
-    hourly: {
-      solar: buildSortedBars(buildEnergyTotals(series.solar, "solar_generation_watts", getHourKey, getStartOfNextDay, windowState)),
-      grid: buildSortedBars(buildEnergyTotals(series.grid, "grid_usage_watts", getHourKey, getStartOfNextDay, windowState)),
-      ev: buildSortedBars(buildEnergyTotals(series.ev, "charging_rate_w_per_min", getHourKey, getStartOfNextDay, windowState))
-    },
-    weekly: {
-      solar: buildSortedBars(buildEnergyTotals(series.solar, "solar_generation_watts", getWeekKey, getStartOfNextWeek, windowState)),
-      grid: buildSortedBars(buildEnergyTotals(series.grid, "grid_usage_watts", getWeekKey, getStartOfNextWeek, windowState)),
-      ev: buildSortedBars(buildEnergyTotals(series.ev, "charging_rate_w_per_min", getWeekKey, getStartOfNextWeek, windowState))
-    },
-    monthly: {
-      solar: buildSortedBars(buildEnergyTotals(series.solar, "solar_generation_watts", getMonthKey, getStartOfNextMonth, windowState)),
-      grid: buildSortedBars(buildEnergyTotals(series.grid, "grid_usage_watts", getMonthKey, getStartOfNextMonth, windowState)),
-      ev: buildSortedBars(buildEnergyTotals(series.ev, "charging_rate_w_per_min", getMonthKey, getStartOfNextMonth, windowState))
     }
   };
-}
-
-function combineBars(solarBars, gridBars, evBars) {
-  const map = new Map();
-  solarBars.forEach((item) => {
-    map.set(item.label, { label: item.label, solar: item.value, grid: 0, ev: 0 });
-  });
-  gridBars.forEach((item) => {
-    const existing = map.get(item.label) || { label: item.label, solar: 0, grid: 0, ev: 0 };
-    existing.grid = item.value;
-    map.set(item.label, existing);
-  });
-  evBars.forEach((item) => {
-    const existing = map.get(item.label) || { label: item.label, solar: 0, grid: 0, ev: 0 };
-    existing.ev = item.value;
-    map.set(item.label, existing);
-  });
-  return Array.from(map.values()).sort((left, right) => left.label.localeCompare(right.label));
-}
-
-
-function renderEnergyBreakdowns(summaryData) {
-  renderEnergyBars(hourlyChartElement, "hourly-bars", "Hourly cumulative split", combineBars(summaryData.hourly.solar, summaryData.hourly.grid, summaryData.hourly.ev));
-  renderEnergyBars(weeklyChartElement, "weekly-bars", "Weekly cumulative split", combineBars(summaryData.weekly.solar, summaryData.weekly.grid, summaryData.weekly.ev));
-  renderEnergyBars(monthlyChartElement, "monthly-bars", "Monthly cumulative split", combineBars(summaryData.monthly.solar, summaryData.monthly.grid, summaryData.monthly.ev));
 }
 
 
@@ -1517,44 +1469,12 @@ function renderDashboardCharts(items, windowState) {
     const summaryData = buildSummaryData(items, windowState);
     renderBleSolarChart(items);
     renderCumulativeChart(summaryData);
-    renderEnergyBreakdowns(summaryData);
     return true;
   } catch (error) {
     console.error("Chart render failed", error);
     renderEmptyCharts();
     return false;
   }
-}
-
-function renderEnergyBars(element, chartKey, title, bars) {
-  const dark = getTheme() === "dark";
-  const labels = bars.map((item) => item.label);
-  createBarChart(element, labels, [
-    {
-      label: "BLE grid",
-      data: bars.map((item) => item.grid),
-      backgroundColor: dark ? "#7fb0ff" : "#6f96d8",
-      borderRadius: 4,
-      barPercentage: 0.9,
-      categoryPercentage: 0.72
-    },
-    {
-      label: "Site solar",
-      data: bars.map((item) => item.solar),
-      backgroundColor: dark ? "#8ee29d" : "#7cc98a",
-      borderRadius: 4,
-      barPercentage: 0.9,
-      categoryPercentage: 0.72
-    },
-    {
-      label: "BYD EV",
-      data: bars.map((item) => item.ev),
-      backgroundColor: dark ? "#ffb45b" : "#d6882e",
-      borderRadius: 4,
-      barPercentage: 0.9,
-      categoryPercentage: 0.72
-    }
-  ]);
 }
 
 function renderBleSolarChart(items) {
@@ -1647,9 +1567,6 @@ function renderCumulativeChart(summaryData) {
 function renderEmptyCharts() {
   renderChartPlaceholder(bleChartElement, "No data in the selected window");
   renderChartPlaceholder(cumulativeChartElement, "No cumulative data in the selected window");
-  renderChartPlaceholder(hourlyChartElement, "No hourly data in the selected window");
-  renderChartPlaceholder(weeklyChartElement, "No weekly data in the selected window");
-  renderChartPlaceholder(monthlyChartElement, "No monthly data in the selected window");
 }
 
 async function refresh() {
@@ -1741,12 +1658,12 @@ if (isFixedRange() && uiState.controls && uiState.controls.startDate) {
 if (isFixedRange() && uiState.controls && uiState.controls.startTime) {
   startTimeInput.value = uiState.controls.startTime;
 }
-syncWindowControls((uiState.controls && uiState.controls.hours) || window.SOLAR_MONITOR_CONFIG.defaultHours || 24);
+syncWindowControls((uiState.controls && uiState.controls.hours) || pageLoadDefaultHours);
 if (isFixedRange()) {
   ensureStartInputs();
   persistDateTimeControls();
 } else {
-  applyDefaultStartDateTime(hoursInput.value || window.SOLAR_MONITOR_CONFIG.defaultHours || 24);
+  applyDefaultStartDateTime(hoursInput.value || pageLoadDefaultHours);
 }
 bindStatusCardPersistence();
 
