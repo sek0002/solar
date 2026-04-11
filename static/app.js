@@ -21,6 +21,9 @@ const topbarBydSubvalue = document.querySelector("#topbar-byd-subvalue");
 const themeToggle = document.querySelector("#theme-toggle");
 const bleChartElement = document.querySelector("#ble-chart");
 const cumulativeChartElement = document.querySelector("#cumulative-chart");
+const hourlyChartElement = document.querySelector("#hourly-chart");
+const dailyChartElement = document.querySelector("#daily-chart");
+const weeklyChartElement = document.querySelector("#weekly-chart");
 const appTimezone = window.SOLAR_MONITOR_CONFIG.timezoneName || "Australia/Melbourne";
 const uiStateKey = "solar-monitor-ui-state";
 const appCacheVersionKey = "solar-monitor-cache-version";
@@ -907,6 +910,18 @@ function getStartOfNextDay(dateLike) {
   return date;
 }
 
+function getStartOfHour(dateLike) {
+  const date = new Date(dateLike);
+  date.setMinutes(0, 0, 0);
+  return date;
+}
+
+function getStartOfNextHour(dateLike) {
+  const date = getStartOfHour(dateLike);
+  date.setHours(date.getHours() + 1);
+  return date;
+}
+
 function getStartOfWeek(dateLike) {
   const date = new Date(dateLike);
   date.setHours(0, 0, 0, 0);
@@ -924,6 +939,37 @@ function getStartOfNextWeek(dateLike) {
 function getStartOfNextMonth(dateLike) {
   const date = new Date(dateLike);
   return new Date(date.getFullYear(), date.getMonth() + 1, 1, 0, 0, 0, 0);
+}
+
+function getTrailingWindow(referenceDate, durationMs) {
+  return {
+    start: new Date(referenceDate.getTime() - durationMs),
+    end: new Date(referenceDate)
+  };
+}
+
+function formatHourBucketLabel(bucketKey) {
+  const [datePart, timePart] = String(bucketKey).split(" ");
+  const [year, month, day] = datePart.split("-").map(Number);
+  const hour = Number((timePart || "00:00").split(":")[0] || 0);
+  return new Date(year, month - 1, day, hour, 0, 0, 0).toLocaleTimeString("en-AU", {
+    hour: "2-digit",
+    minute: "2-digit"
+  });
+}
+
+function formatDayBucketLabel(bucketKey) {
+  const [year, month, day] = String(bucketKey).split("-").map(Number);
+  return new Date(year, month - 1, day, 0, 0, 0, 0).toLocaleDateString("en-AU", {
+    day: "2-digit",
+    month: "short"
+  });
+}
+
+function formatWeekBucketLabel(bucketKey) {
+  const [year, month, day] = String(bucketKey).split("-").map(Number);
+  const labelDate = new Date(year, month - 1, day, 0, 0, 0, 0);
+  return `Week of ${labelDate.toLocaleDateString("en-AU", { day: "2-digit", month: "short" })}`;
 }
 
 function splitEnergyAcrossBuckets(startDate, endDate, averageRate, keyBuilder, nextBoundaryBuilder) {
@@ -1220,12 +1266,21 @@ function getSeriesBySource(items) {
 
 function buildSummaryData(items, windowState) {
   const series = getSeriesBySource(items);
+  const referenceEnd = new Date(windowState.end);
+  const hourlyWindow = getTrailingWindow(referenceEnd, 24 * 3600000);
+  const dailyWindow = getTrailingWindow(referenceEnd, 7 * 24 * 3600000);
+  const weeklyWindow = getTrailingWindow(referenceEnd, 30 * 24 * 3600000);
   return {
     series,
     cumulative: {
       solar: integrateSeriesKwh(series.solar, "solar_generation_watts", windowState),
       grid: integrateSeriesKwh(series.grid, "grid_usage_watts", windowState),
       ev: integrateSeriesKwh(series.ev, "charging_rate_w_per_min", windowState)
+    },
+    generation: {
+      hourly: buildEnergyTotals(series.solar, "solar_generation_watts", getHourKey, getStartOfNextHour, hourlyWindow),
+      daily: buildEnergyTotals(series.solar, "solar_generation_watts", getDayKey, getStartOfNextDay, dailyWindow),
+      weekly: buildEnergyTotals(series.solar, "solar_generation_watts", getWeekKey, getStartOfNextWeek, weeklyWindow)
     }
   };
 }
@@ -1469,6 +1524,7 @@ function renderDashboardCharts(items, windowState) {
     const summaryData = buildSummaryData(items, windowState);
     renderBleSolarChart(items);
     renderCumulativeChart(summaryData);
+    renderGenerationSummaryCharts(summaryData);
     return true;
   } catch (error) {
     console.error("Chart render failed", error);
@@ -1564,9 +1620,33 @@ function renderCumulativeChart(summaryData) {
   ], "energy");
 }
 
+function renderGenerationSummaryChart(element, totals, formatter) {
+  const dark = getTheme() === "dark";
+  const entries = Array.from(totals.entries()).sort((left, right) => left[0].localeCompare(right[0]));
+  createBarChart(element, entries.map(([label]) => formatter(label)), [
+    {
+      label: "Site solar",
+      data: entries.map(([, value]) => Number(value || 0)),
+      backgroundColor: dark ? "#8ee29d" : "#7cc98a",
+      borderRadius: 4,
+      barPercentage: 0.88,
+      categoryPercentage: 0.74
+    }
+  ]);
+}
+
+function renderGenerationSummaryCharts(summaryData) {
+  renderGenerationSummaryChart(hourlyChartElement, summaryData.generation.hourly, formatHourBucketLabel);
+  renderGenerationSummaryChart(dailyChartElement, summaryData.generation.daily, formatDayBucketLabel);
+  renderGenerationSummaryChart(weeklyChartElement, summaryData.generation.weekly, formatWeekBucketLabel);
+}
+
 function renderEmptyCharts() {
   renderChartPlaceholder(bleChartElement, "No data in the selected window");
   renderChartPlaceholder(cumulativeChartElement, "No cumulative data in the selected window");
+  renderChartPlaceholder(hourlyChartElement, "No hourly generation data available");
+  renderChartPlaceholder(dailyChartElement, "No daily generation data available");
+  renderChartPlaceholder(weeklyChartElement, "No weekly generation data available");
 }
 
 async function refresh() {
