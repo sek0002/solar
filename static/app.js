@@ -261,43 +261,45 @@ function buildChartTheme() {
 }
 
 function formatRatePerMinute(value) {
-  if (value === null || value === undefined || Number.isNaN(value)) {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) {
     return "n/a";
   }
-  return `${Number(value).toFixed(1)} W`;
+  return `${Number(value).toFixed(1)} W/min`;
 }
 
 function formatKwPerHour(value) {
-  if (value === null || value === undefined || Number.isNaN(value)) {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) {
     return "n/a";
   }
-  return `${ratePerMinuteToKwPerHour(value).toFixed(3)} kW`;
+  return `${ratePerMinuteToKwPerHour(value).toFixed(3)} kW/hr`;
 }
 
 function formatWatts(value) {
-  if (value === null || value === undefined || Number.isNaN(value)) {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) {
     return "n/a";
   }
-  return `${Number(value).toFixed(1)} W`;
+  return `${Number(value).toFixed(1)} W/min`;
 }
 
 function formatGaugeKwPerHour(value) {
   if (value === null || value === undefined || Number.isNaN(Number(value))) {
     return "n/a";
   }
-  return ratePerMinuteToKwPerHour(value).toFixed(2);
+  return `${ratePerMinuteToKwPerHour(value).toFixed(2)} kW/hr`;
 }
 
 function ratePerMinuteToKwh(ratePerMinute, deltaMinutes) {
-  return (Number(ratePerMinute) * deltaMinutes) / 60000;
+  // Pollers emit W/min. Aggregate over minutes, then convert to kWh.
+  return (Number(ratePerMinute) * deltaMinutes) / 1000;
 }
 
 function ratePerMinuteToKwPerHour(value) {
-  return Number(value) / 1000;
+  // W/min -> kW/hr
+  return (Number(value) * 60) / 1000;
 }
 
 function wattsToKw(value) {
-  return Number(value) / 1000;
+  return (Number(value) * 60) / 1000;
 }
 
 function clamp(value, min, max) {
@@ -353,7 +355,7 @@ function renderTopbarGauge(samples) {
 function renderBydTopbarGauge(samples, pollers) {
   const bydSample = (samples || []).find((item) => item.source === "byd_ev");
   const glWatts = bydSample ? getBydPowerWatts(bydSample) : null;
-  const glRate = glWatts === null ? null : glWatts / 60;
+  const glRate = glWatts;
   const socPercent = getBydSocPercent(samples, pollers);
   const socProgress = clamp((socPercent === null ? 0 : socPercent / 100), 0, 1);
 
@@ -422,19 +424,19 @@ function toChartTime(dateLike) {
 }
 
 function getAxisTitleRate() {
-  return "kW";
+  return "kW/hr";
 }
 
 function getAxisTitleSubRate() {
-  return "W";
+  return "W/min";
 }
 
 function buildRateHoverTemplate(label) {
-  return `<b>${label}</b><br>%{x}<br>%{y:.3f} kW<br>%{customdata:.1f} W<extra></extra>`;
+  return `<b>${label}</b><br>%{x}<br>%{y:.3f} kW/hr<br>%{customdata:.1f} W/min<extra></extra>`;
 }
 
 function buildPowerHoverTemplate(label) {
-  return `<b>${label}</b><br>%{x}<br>%{y:.3f} kW<br>%{customdata:.1f} W<extra></extra>`;
+  return `<b>${label}</b><br>%{x}<br>%{y:.3f} kW/hr<br>%{customdata:.1f} W/min<extra></extra>`;
 }
 
 function buildNowLine(xValue) {
@@ -563,7 +565,7 @@ function getBydPowerSeries(items) {
     .map((item) => item.movement_suppressed
       ? { ...item, power_w: 0, charging_rate_w_per_min: 0 }
       : item)
-    .filter((item) => item.charging_rate_w_per_min !== null)
+    .filter((item) => item.charging_rate_w_per_min !== null);
 }
 
 function getChartHeight() {
@@ -1285,7 +1287,6 @@ function buildSummaryData(items, windowState) {
   };
 }
 
-
 const lightweightCharts = new Map();
 
 function getChartInstance(element) {
@@ -1423,7 +1424,7 @@ function createLineChart(element, datasets, tooltipMode = "rate") {
           title: {
             display: true,
             color: theme.muted,
-            text: tooltipMode === "energy" ? "kWh" : "kW"
+            text: tooltipMode === "energy" ? "kWh" : "kW/hr"
           }
         }
       },
@@ -1441,7 +1442,7 @@ function createLineChart(element, datasets, tooltipMode = "rate") {
                 return `${context.dataset.label}: ${Number(context.raw.y || 0).toFixed(3)} kWh`;
               }
               const rawRate = context.raw.raw;
-              return `${context.dataset.label}: ${Number(context.raw.y || 0).toFixed(3)} kW (${Number(rawRate || 0).toFixed(1)} W)`;
+              return `${context.dataset.label}: ${Number(context.raw.y || 0).toFixed(3)} kW/hr (${Number(rawRate || 0).toFixed(1)} W/min)`;
             }
           }
         }
