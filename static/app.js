@@ -288,6 +288,13 @@ function formatGaugeKwPerHour(value) {
   return `${ratePerMinuteToKwPerHour(value).toFixed(2)} kW/hr`;
 }
 
+function formatGaugeKwFromWatts(value) {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) {
+    return "n/a";
+  }
+  return `${(Number(value) / 1000).toFixed(2)} kW`;
+}
+
 function ratePerMinuteToKwh(ratePerMinute, deltaMinutes) {
   // Pollers emit W/min. Aggregate over minutes, then convert to kWh.
   return (Number(ratePerMinute) * deltaMinutes) / 1000;
@@ -299,7 +306,7 @@ function ratePerMinuteToKwPerHour(value) {
 }
 
 function wattsToKw(value) {
-  return (Number(value) * 60) / 1000;
+  return Number(value) / 1000;
 }
 
 function clamp(value, min, max) {
@@ -317,7 +324,7 @@ function getInfernoSolarColor(ratePerMinute, maxKwPerHour = 5) {
     { t: 0.75, color: [249, 142, 8] },
     { t: 1.0, color: [252, 255, 164] }
   ];
-  const normalized = clamp(ratePerMinuteToKwPerHour(ratePerMinute) / maxKwPerHour, 0, 1);
+  const normalized = clamp(wattsToKw(ratePerMinute) / maxKwPerHour, 0, 1);
   const upperIndex = stops.findIndex((stop) => stop.t >= normalized);
   const upper = upperIndex === -1 ? stops[stops.length - 1] : stops[upperIndex];
   const lower = upperIndex <= 0 ? stops[0] : stops[upperIndex - 1];
@@ -337,7 +344,7 @@ function getLatestRateBySource(samples, source, valueKey) {
 function renderTopbarGauge(samples) {
   const solarRate = getLatestRateBySource(samples, "local_site", "solar_generation_watts");
   const bleRate = getLatestRateBySource(samples, "ble", "grid_usage_watts");
-  const bleProgress = clamp((bleRate === null ? 0 : ratePerMinuteToKwPerHour(bleRate) / 10), 0, 1);
+  const bleProgress = clamp((bleRate === null ? 0 : wattsToKw(bleRate) / 10), 0, 1);
 
   if (topbarGauge) {
     topbarGauge.style.setProperty("--ring-progress", `${bleProgress}turn`);
@@ -345,10 +352,10 @@ function renderTopbarGauge(samples) {
     topbarGauge.style.setProperty("--inner-ring-stroke", "rgba(240, 244, 255, 0.1)");
   }
   if (topbarSolarValue) {
-    topbarSolarValue.textContent = formatGaugeKwPerHour(solarRate);
+    topbarSolarValue.textContent = formatGaugeKwFromWatts(solarRate);
   }
   if (topbarBleValue) {
-    topbarBleValue.textContent = bleRate === null ? "BLE n/a" : `BLE ${formatGaugeKwPerHour(bleRate)}`;
+    topbarBleValue.textContent = bleRate === null ? "BLE n/a" : `BLE ${formatGaugeKwFromWatts(bleRate)}`;
   }
 }
 
@@ -365,7 +372,7 @@ function renderBydTopbarGauge(samples, pollers) {
     topbarBydGauge.style.setProperty("--inner-ring-stroke", "rgba(255, 214, 181, 0.09)");
   }
   if (topbarBydValue) {
-    topbarBydValue.textContent = formatGaugeKwPerHour(glRate);
+    topbarBydValue.textContent = formatGaugeKwFromWatts(glRate);
   }
   if (topbarBydSubvalue) {
     topbarBydSubvalue.textContent = socPercent === null ? "SoC n/a" : `SoC ${socPercent.toFixed(0)}%`;
