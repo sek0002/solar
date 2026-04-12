@@ -370,24 +370,7 @@ function getLatestRateBySource(samples, source, valueKey) {
   const latestItem = (samples || [])
     .filter((item) => item.source === source && item[valueKey] !== null && item[valueKey] !== undefined)
     .sort((left, right) => new Date(right.observed_at) - new Date(left.observed_at))[0];
-  return latestItem ? getSampleValue(latestItem, valueKey) : null;
-}
-
-function getSampleValue(item, valueKey) {
-  if (!item) {
-    return null;
-  }
-  const payload = item.raw_payload || {};
-  if (item.source === "local_site") {
-    if (valueKey === "solar_generation_watts" && Number.isFinite(Number(payload.solar_generation_power_w))) {
-      return Number(payload.solar_generation_power_w);
-    }
-    if (valueKey === "grid_usage_watts" && Number.isFinite(Number(payload.grid_usage_power_w))) {
-      return Number(payload.grid_usage_power_w);
-    }
-  }
-  const numeric = Number(item[valueKey]);
-  return Number.isFinite(numeric) ? numeric : null;
+  return latestItem ? Number(latestItem[valueKey]) : null;
 }
 
 function renderTopbarGauge(samples) {
@@ -397,11 +380,11 @@ function renderTopbarGauge(samples) {
 
   if (topbarGauge) {
     topbarGauge.style.setProperty("--ring-progress", `${bleProgress}turn`);
-    topbarGauge.style.setProperty("--core-fill", getInfernoSolarColorFromWatts(solarRate, 5));
+    topbarGauge.style.setProperty("--core-fill", getInfernoSolarColor(solarRate, 5));
     topbarGauge.style.setProperty("--inner-ring-stroke", "rgba(240, 244, 255, 0.1)");
   }
   if (topbarSolarValue) {
-    topbarSolarValue.textContent = formatGaugeKwPerHourFromWatts(solarRate);
+    topbarSolarValue.textContent = formatGaugeKwPerHour(solarRate);
   }
   if (topbarBleValue) {
     topbarBleValue.textContent = bleRate === null ? "BLE n/a" : `BLE ${formatGaugeKwPerHour(bleRate)}`;
@@ -864,8 +847,8 @@ function formatMetricCard(item) {
   return `
     <article class="metric-card">
       <span>${item.source}</span>
-      ${item.source === "local_site" ? formatMetricReadingPower("Grid", getSampleValue(item, "grid_usage_watts")) : formatMetricReading("Grid", item.grid_usage_watts)}
-      ${item.source === "local_site" ? formatMetricReadingPower("Solar", getSampleValue(item, "solar_generation_watts")) : formatMetricReading("Solar", item.solar_generation_watts)}
+      ${formatMetricReading("Grid", item.grid_usage_watts)}
+      ${formatMetricReading("Solar", item.solar_generation_watts)}
       <small>${isImputed ? "Estimated from previous readings" : "Live reading"}</small>
       <small>${formatDateTime(item.observed_at)}</small>
     </article>
@@ -1236,9 +1219,7 @@ function getTodayAndWeekTotals(items) {
     solarSeries,
     "solar_generation_watts",
     getDayKey,
-    getStartOfNextDay,
-    null,
-    wattsToKwh
+    getStartOfNextDay
   );
   const gridDailyTotals = buildEnergyTotals(
     gridSeries,
@@ -1256,9 +1237,7 @@ function getTodayAndWeekTotals(items) {
     solarSeries,
     "solar_generation_watts",
     getWeekKey,
-    getStartOfNextWeek,
-    null,
-    wattsToKwh
+    getStartOfNextWeek
   );
   const gridWeeklyTotals = buildEnergyTotals(
     gridSeries,
@@ -1276,9 +1255,7 @@ function getTodayAndWeekTotals(items) {
     solarSeries,
     "solar_generation_watts",
     getMonthKey,
-    getStartOfNextMonth,
-    null,
-    wattsToKwh
+    getStartOfNextMonth
   );
   const gridMonthlyTotals = buildEnergyTotals(
     gridSeries,
@@ -1348,11 +1325,7 @@ function renderCumulativeStats(items, pollers = []) {
 
 function getSeriesBySource(items) {
   return {
-    solar: sortByObservedAt(
-      items
-        .filter((item) => item.source === "local_site" && getSampleValue(item, "solar_generation_watts") !== null)
-        .map((item) => ({ ...item, solar_generation_watts: getSampleValue(item, "solar_generation_watts") }))
-    ),
+    solar: sortByObservedAt(items.filter((item) => item.source === "local_site" && item.solar_generation_watts !== null)),
     grid: sortByObservedAt(items.filter((item) => item.source === "ble" && item.grid_usage_watts !== null)),
     ev: getBydPowerSeries(items)
   };
@@ -1367,14 +1340,14 @@ function buildSummaryData(items, windowState) {
   return {
     series,
     cumulative: {
-      solar: integrateSeriesKwh(series.solar, "solar_generation_watts", windowState, wattsToKwh),
+      solar: integrateSeriesKwh(series.solar, "solar_generation_watts", windowState),
       grid: integrateSeriesKwh(series.grid, "grid_usage_watts", windowState),
       ev: integrateSeriesKwh(series.ev, "charging_rate_w_per_min", windowState)
     },
     generation: {
-      hourly: buildEnergyTotals(series.solar, "solar_generation_watts", getHourKey, getStartOfNextHour, hourlyWindow, wattsToKwh),
-      daily: buildEnergyTotals(series.solar, "solar_generation_watts", getDayKey, getStartOfNextDay, dailyWindow, wattsToKwh),
-      weekly: buildEnergyTotals(series.solar, "solar_generation_watts", getWeekKey, getStartOfNextWeek, weeklyWindow, wattsToKwh)
+      hourly: buildEnergyTotals(series.solar, "solar_generation_watts", getHourKey, getStartOfNextHour, hourlyWindow),
+      daily: buildEnergyTotals(series.solar, "solar_generation_watts", getDayKey, getStartOfNextDay, dailyWindow),
+      weekly: buildEnergyTotals(series.solar, "solar_generation_watts", getWeekKey, getStartOfNextWeek, weeklyWindow)
     }
   };
 }
@@ -1633,8 +1606,7 @@ function renderBleSolarChart(items) {
     .filter((item) => item.source === "ble" && item.grid_usage_watts !== null)
     .sort((left, right) => new Date(left.observed_at) - new Date(right.observed_at));
   const siteSolar = items
-    .filter((item) => item.source === "local_site" && getSampleValue(item, "solar_generation_watts") !== null)
-    .map((item) => ({ ...item, solar_generation_watts: getSampleValue(item, "solar_generation_watts") }))
+    .filter((item) => item.source === "local_site" && item.solar_generation_watts !== null)
     .sort((left, right) => new Date(left.observed_at) - new Date(right.observed_at));
   const evItems = getBydPowerSeries(items);
 
@@ -1655,9 +1627,9 @@ function renderBleSolarChart(items) {
       label: "Site solar",
       data: siteSolar.map((item) => ({
         x: toChartTime(item.observed_at).getTime(),
-        y: wattsToKw(item.solar_generation_watts),
+        y: ratePerMinuteToKwPerHour(item.solar_generation_watts),
         raw: Number(item.solar_generation_watts),
-        rawUnit: "W/hr"
+        rawUnit: "W/min"
       })),
       borderColor: dark ? "#8ee29d" : "#7cc98a",
       backgroundColor: dark ? "rgba(142, 226, 157, 0.12)" : "rgba(124, 201, 138, 0.12)",
