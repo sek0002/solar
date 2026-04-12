@@ -1607,11 +1607,67 @@ function getSamplesFetchLimit(hours) {
   return Math.min(20000, Math.max(5000, estimatedPoints));
 }
 
+function shouldAggregateLineWindow(windowState) {
+  if (!windowState || !windowState.start || !windowState.end) {
+    return false;
+  }
+  return (windowState.end.getTime() - windowState.start.getTime()) > (12 * 3600000);
+}
+
+function aggregateLineSeries(points, windowState, maxPoints = 720, mode = "average") {
+  if (!Array.isArray(points) || points.length <= maxPoints || !shouldAggregateLineWindow(windowState)) {
+    return points;
+  }
+
+  const startMs = windowState.start.getTime();
+  const endMs = windowState.end.getTime();
+  const durationMs = Math.max(1, endMs - startMs);
+  const bucketMs = Math.max(1, Math.ceil(durationMs / maxPoints));
+  const buckets = new Map();
+
+  points.forEach((point) => {
+    const x = Number(point.x);
+    if (!Number.isFinite(x)) {
+      return;
+    }
+    const bucketIndex = Math.max(0, Math.min(maxPoints - 1, Math.floor((x - startMs) / bucketMs)));
+    const bucket = buckets.get(bucketIndex) || [];
+    bucket.push(point);
+    buckets.set(bucketIndex, bucket);
+  });
+
+  return Array.from(buckets.keys())
+    .sort((left, right) => left - right)
+    .map((bucketIndex) => {
+      const bucketPoints = buckets.get(bucketIndex) || [];
+      if (!bucketPoints.length) {
+        return null;
+      }
+      if (mode === "last") {
+        return bucketPoints[bucketPoints.length - 1];
+      }
+      const summed = bucketPoints.reduce((accumulator, point) => ({
+        x: accumulator.x + Number(point.x || 0),
+        y: accumulator.y + Number(point.y || 0),
+        raw: accumulator.raw + Number(point.raw || 0)
+      }), { x: 0, y: 0, raw: 0 });
+      const count = bucketPoints.length;
+      const firstPoint = bucketPoints[0];
+      return {
+        ...firstPoint,
+        x: summed.x / count,
+        y: summed.y / count,
+        raw: Object.prototype.hasOwnProperty.call(firstPoint, "raw") ? (summed.raw / count) : firstPoint.raw
+      };
+    })
+    .filter(Boolean);
+}
+
 function renderDashboardCharts(items, windowState) {
   try {
     const summaryData = buildSummaryData(items, windowState);
-    renderBleSolarChart(items);
-    renderCumulativeChart(summaryData);
+    renderBleSolarChart(items, windowState);
+    renderCumulativeChart(summaryData, windowState);
     renderGenerationSummaryCharts(summaryData);
     return true;
   } catch (error) {
@@ -1621,7 +1677,7 @@ function renderDashboardCharts(items, windowState) {
   }
 }
 
-function renderBleSolarChart(items) {
+function renderBleSolarChart(items, windowState) {
   const dark = getTheme() === "dark";
   const bleGrid = items
     .filter((item) => item.source === "ble" && item.grid_usage_watts !== null)
@@ -1634,36 +1690,36 @@ function renderBleSolarChart(items) {
   createLineChart(bleChartElement, [
     {
       label: "BLE grid",
-      data: bleGrid.map((item) => ({
+      data: aggregateLineSeries(bleGrid.map((item) => ({
         x: toChartTime(item.observed_at).getTime(),
         y: ratePerMinuteToKwPerHour(item.grid_usage_watts),
         raw: Number(item.grid_usage_watts),
         rawUnit: "W/min"
-      })),
+      })), windowState),
       borderColor: dark ? "#7fb0ff" : "#6f96d8",
       backgroundColor: dark ? "rgba(127, 176, 255, 0.16)" : "rgba(111, 150, 216, 0.17)",
       fill: true
     },
     {
       label: "Site solar",
-      data: siteSolar.map((item) => ({
+      data: aggregateLineSeries(siteSolar.map((item) => ({
         x: toChartTime(item.observed_at).getTime(),
         y: ratePerMinuteToKwPerHour(item.solar_generation_watts),
         raw: Number(item.solar_generation_watts),
         rawUnit: "W/min"
-      })),
+      })), windowState),
       borderColor: dark ? "#8ee29d" : "#7cc98a",
       backgroundColor: dark ? "rgba(142, 226, 157, 0.12)" : "rgba(124, 201, 138, 0.12)",
       fill: true
     },
     {
       label: "BYD EV",
-      data: evItems.map((item) => ({
+      data: aggregateLineSeries(evItems.map((item) => ({
         x: toChartTime(item.observed_at).getTime(),
         y: wattsToKw(item.power_w),
         raw: Number(item.power_w),
         rawUnit: "W/hr"
-      })),
+      })), windowState),
       borderColor: dark ? "#ffb45b" : "#d6882e",
       backgroundColor: "rgba(0,0,0,0)",
       fill: false
@@ -1671,7 +1727,7 @@ function renderBleSolarChart(items) {
   ], "rate");
 }
 
-function renderCumulativeChart(summaryData) {
+function renderCumulativeChart(summaryData, windowState) {
   const dark = getTheme() === "dark";
   const solarKwh = summaryData.cumulative.solar;
   const gridKwh = summaryData.cumulative.grid;
@@ -1680,30 +1736,30 @@ function renderCumulativeChart(summaryData) {
   createLineChart(cumulativeChartElement, [
     {
       label: "Site solar cumulative",
-      data: solarKwh.map((item) => ({
+      data: aggregateLineSeries(solarKwh.map((item) => ({
         x: toChartTime(item.observed_at).getTime(),
         y: item.cumulative_kwh
-      })),
+      })), windowState, 720, "last"),
       borderColor: dark ? "#8ee29d" : "#7cc98a",
       backgroundColor: dark ? "rgba(142, 226, 157, 0.14)" : "rgba(124, 201, 138, 0.12)",
       fill: true
     },
     {
       label: "BLE grid cumulative",
-      data: gridKwh.map((item) => ({
+      data: aggregateLineSeries(gridKwh.map((item) => ({
         x: toChartTime(item.observed_at).getTime(),
         y: item.cumulative_kwh
-      })),
+      })), windowState, 720, "last"),
       borderColor: dark ? "#7fb0ff" : "#6f96d8",
       backgroundColor: dark ? "rgba(127, 176, 255, 0.12)" : "rgba(111, 150, 216, 0.09)",
       fill: true
     },
     {
       label: "BYD EV cumulative",
-      data: evKwh.map((item) => ({
+      data: aggregateLineSeries(evKwh.map((item) => ({
         x: toChartTime(item.observed_at).getTime(),
         y: item.cumulative_kwh
-      })),
+      })), windowState, 720, "last"),
       borderColor: dark ? "#ffb45b" : "#d6882e",
       backgroundColor: dark ? "rgba(255, 180, 91, 0.12)" : "rgba(214, 136, 46, 0.10)",
       fill: true
