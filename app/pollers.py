@@ -462,7 +462,9 @@ class LocalSitePoller:
                         details={
                             "url": self.settings.local_site_url,
                             "latest_grid_usage_watts": payload.get("grid_usage_watts"),
+                            "latest_grid_usage_w_per_min": watts_to_rate_per_minute(payload.get("grid_usage_watts")),
                             "latest_solar_generation_watts": payload.get("solar_generation_watts"),
+                            "latest_solar_generation_w_per_min": watts_to_rate_per_minute(payload.get("solar_generation_watts")),
                             "latest_observed_at": observed_at.isoformat(),
                         },
                     )
