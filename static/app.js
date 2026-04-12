@@ -370,7 +370,24 @@ function getLatestRateBySource(samples, source, valueKey) {
   const latestItem = (samples || [])
     .filter((item) => item.source === source && item[valueKey] !== null && item[valueKey] !== undefined)
     .sort((left, right) => new Date(right.observed_at) - new Date(left.observed_at))[0];
-  return latestItem ? Number(latestItem[valueKey]) : null;
+  return latestItem ? getSampleValue(latestItem, valueKey) : null;
+}
+
+function getSampleValue(item, valueKey) {
+  if (!item) {
+    return null;
+  }
+  const payload = item.raw_payload || {};
+  if (item.source === "local_site") {
+    if (valueKey === "solar_generation_watts" && Number.isFinite(Number(payload.solar_generation_power_w))) {
+      return Number(payload.solar_generation_power_w);
+    }
+    if (valueKey === "grid_usage_watts" && Number.isFinite(Number(payload.grid_usage_power_w))) {
+      return Number(payload.grid_usage_power_w);
+    }
+  }
+  const numeric = Number(item[valueKey]);
+  return Number.isFinite(numeric) ? numeric : null;
 }
 
 function renderTopbarGauge(samples) {
@@ -847,8 +864,8 @@ function formatMetricCard(item) {
   return `
     <article class="metric-card">
       <span>${item.source}</span>
-      ${item.source === "local_site" ? formatMetricReadingPower("Grid", item.grid_usage_watts) : formatMetricReading("Grid", item.grid_usage_watts)}
-      ${item.source === "local_site" ? formatMetricReadingPower("Solar", item.solar_generation_watts) : formatMetricReading("Solar", item.solar_generation_watts)}
+      ${item.source === "local_site" ? formatMetricReadingPower("Grid", getSampleValue(item, "grid_usage_watts")) : formatMetricReading("Grid", item.grid_usage_watts)}
+      ${item.source === "local_site" ? formatMetricReadingPower("Solar", getSampleValue(item, "solar_generation_watts")) : formatMetricReading("Solar", item.solar_generation_watts)}
       <small>${isImputed ? "Estimated from previous readings" : "Live reading"}</small>
       <small>${formatDateTime(item.observed_at)}</small>
     </article>
@@ -1331,7 +1348,11 @@ function renderCumulativeStats(items, pollers = []) {
 
 function getSeriesBySource(items) {
   return {
-    solar: sortByObservedAt(items.filter((item) => item.source === "local_site" && item.solar_generation_watts !== null)),
+    solar: sortByObservedAt(
+      items
+        .filter((item) => item.source === "local_site" && getSampleValue(item, "solar_generation_watts") !== null)
+        .map((item) => ({ ...item, solar_generation_watts: getSampleValue(item, "solar_generation_watts") }))
+    ),
     grid: sortByObservedAt(items.filter((item) => item.source === "ble" && item.grid_usage_watts !== null)),
     ev: getBydPowerSeries(items)
   };
@@ -1612,7 +1633,8 @@ function renderBleSolarChart(items) {
     .filter((item) => item.source === "ble" && item.grid_usage_watts !== null)
     .sort((left, right) => new Date(left.observed_at) - new Date(right.observed_at));
   const siteSolar = items
-    .filter((item) => item.source === "local_site" && item.solar_generation_watts !== null)
+    .filter((item) => item.source === "local_site" && getSampleValue(item, "solar_generation_watts") !== null)
+    .map((item) => ({ ...item, solar_generation_watts: getSampleValue(item, "solar_generation_watts") }))
     .sort((left, right) => new Date(left.observed_at) - new Date(right.observed_at));
   const evItems = getBydPowerSeries(items);
 
