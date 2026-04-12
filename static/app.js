@@ -1546,6 +1546,7 @@ function createBarChart(element, labels, datasets) {
     data: { labels, datasets },
     options: {
       ...baseChartOptions(theme),
+      parsing: true,
       scales: {
         x: {
           type: "category",
