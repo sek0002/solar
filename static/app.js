@@ -1345,9 +1345,21 @@ function buildSummaryData(items, windowState) {
       ev: integrateSeriesKwh(series.ev, "charging_rate_w_per_min", windowState)
     },
     generation: {
-      hourly: buildEnergyTotals(series.solar, "solar_generation_watts", getHourKey, getStartOfNextHour, hourlyWindow),
-      daily: buildEnergyTotals(series.solar, "solar_generation_watts", getDayKey, getStartOfNextDay, dailyWindow),
-      weekly: buildEnergyTotals(series.solar, "solar_generation_watts", getWeekKey, getStartOfNextWeek, weeklyWindow)
+      hourly: {
+        solar: buildEnergyTotals(series.solar, "solar_generation_watts", getHourKey, getStartOfNextHour, hourlyWindow),
+        grid: buildEnergyTotals(series.grid, "grid_usage_watts", getHourKey, getStartOfNextHour, hourlyWindow),
+        ev: buildEnergyTotals(series.ev, "charging_rate_w_per_min", getHourKey, getStartOfNextHour, hourlyWindow)
+      },
+      daily: {
+        solar: buildEnergyTotals(series.solar, "solar_generation_watts", getDayKey, getStartOfNextDay, dailyWindow),
+        grid: buildEnergyTotals(series.grid, "grid_usage_watts", getDayKey, getStartOfNextDay, dailyWindow),
+        ev: buildEnergyTotals(series.ev, "charging_rate_w_per_min", getDayKey, getStartOfNextDay, dailyWindow)
+      },
+      weekly: {
+        solar: buildEnergyTotals(series.solar, "solar_generation_watts", getWeekKey, getStartOfNextWeek, weeklyWindow),
+        grid: buildEnergyTotals(series.grid, "grid_usage_watts", getWeekKey, getStartOfNextWeek, weeklyWindow),
+        ev: buildEnergyTotals(series.ev, "charging_rate_w_per_min", getWeekKey, getStartOfNextWeek, weeklyWindow)
+      }
     }
   };
 }
@@ -1690,14 +1702,35 @@ function renderCumulativeChart(summaryData) {
   ], "energy");
 }
 
-function renderGenerationSummaryChart(element, totals, formatter) {
+function renderGenerationSummaryChart(element, totalsBySource, formatter) {
   const dark = getTheme() === "dark";
-  const entries = Array.from(totals.entries()).sort((left, right) => left[0].localeCompare(right[0]));
-  createBarChart(element, entries.map(([label]) => formatter(label)), [
+  const allLabels = Array.from(new Set([
+    ...totalsBySource.solar.keys(),
+    ...totalsBySource.grid.keys(),
+    ...totalsBySource.ev.keys()
+  ])).sort((left, right) => left.localeCompare(right));
+
+  createBarChart(element, allLabels.map((label) => formatter(label)), [
     {
       label: "Site solar",
-      data: entries.map(([, value]) => Number(value || 0)),
+      data: allLabels.map((label) => Number(totalsBySource.solar.get(label) || 0)),
       backgroundColor: dark ? "#8ee29d" : "#7cc98a",
+      borderRadius: 4,
+      barPercentage: 0.88,
+      categoryPercentage: 0.74
+    },
+    {
+      label: "BLE grid",
+      data: allLabels.map((label) => Number(totalsBySource.grid.get(label) || 0)),
+      backgroundColor: dark ? "#7fb0ff" : "#6f96d8",
+      borderRadius: 4,
+      barPercentage: 0.88,
+      categoryPercentage: 0.74
+    },
+    {
+      label: "BYD EV",
+      data: allLabels.map((label) => Number(totalsBySource.ev.get(label) || 0)),
+      backgroundColor: dark ? "#ffb45b" : "#d6882e",
       borderRadius: 4,
       barPercentage: 0.88,
       categoryPercentage: 0.74
