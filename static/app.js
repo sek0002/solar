@@ -1599,6 +1599,14 @@ function resizeCharts() {
   lightweightCharts.forEach((chart) => chart.resize());
 }
 
+function getSamplesFetchLimit(hours) {
+  const numericHours = Math.max(1, Number(hours) || 1);
+  const pointsPerHourPerSource = Math.ceil(3600 / 15);
+  const estimatedSources = 4;
+  const estimatedPoints = Math.ceil(numericHours * pointsPerHourPerSource * estimatedSources * 1.1);
+  return Math.min(20000, Math.max(5000, estimatedPoints));
+}
+
 function renderDashboardCharts(items, windowState) {
   try {
     const summaryData = buildSummaryData(items, windowState);
@@ -1770,9 +1778,10 @@ async function refresh() {
     }
     const end = new Date(safeStart.getTime() + hours * 3600000);
     const windowState = buildWindowState(safeStart, end);
+    const fetchLimit = getSamplesFetchLimit(hours);
     const [statusResponse, samplesResponse] = await Promise.all([
       fetch("/api/status"),
-      fetch(`/api/samples?hours=${hours}&start=${encodeURIComponent(safeStart.toISOString())}&end=${encodeURIComponent(end.toISOString())}`)
+      fetch(`/api/samples?hours=${hours}&limit=${fetchLimit}&start=${encodeURIComponent(safeStart.toISOString())}&end=${encodeURIComponent(end.toISOString())}`)
     ]);
 
     if (!statusResponse.ok || !samplesResponse.ok) {

@@ -98,11 +98,15 @@ class Database:
             rows = connection.execute(
                 """
                 SELECT source, observed_at, grid_usage_watts, solar_generation_watts, raw_payload
-                FROM samples
-                WHERE observed_at >= ?
-                  AND observed_at <= ?
+                FROM (
+                    SELECT source, observed_at, grid_usage_watts, solar_generation_watts, raw_payload
+                    FROM samples
+                    WHERE observed_at >= ?
+                      AND observed_at <= ?
+                    ORDER BY observed_at DESC
+                    LIMIT ?
+                ) recent_samples
                 ORDER BY observed_at ASC
-                LIMIT ?
                 """,
                 (
                     since.astimezone(timezone.utc).isoformat(),
