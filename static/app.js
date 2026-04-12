@@ -281,6 +281,13 @@ function formatWatts(value) {
   return `${Number(value).toFixed(1)} W/min`;
 }
 
+function formatWattsPerHour(value) {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) {
+    return "n/a";
+  }
+  return `${Number(value).toFixed(1)} W/hr`;
+}
+
 function formatGaugeKwPerHour(value) {
   if (value === null || value === undefined || Number.isNaN(Number(value))) {
     return "n/a";
@@ -288,16 +295,20 @@ function formatGaugeKwPerHour(value) {
   return `${ratePerMinuteToKwPerHour(value).toFixed(2)} kW/hr`;
 }
 
-function formatGaugeKwFromWatts(value) {
+function formatGaugeKwPerHourFromWatts(value) {
   if (value === null || value === undefined || Number.isNaN(Number(value))) {
     return "n/a";
   }
-  return `${(Number(value) / 1000).toFixed(2)} kW`;
+  return `${(Number(value) / 1000).toFixed(2)} kW/hr`;
 }
 
 function ratePerMinuteToKwh(ratePerMinute, deltaMinutes) {
   // Pollers emit W/min. Aggregate over minutes, then convert to kWh.
   return (Number(ratePerMinute) * deltaMinutes) / 1000;
+}
+
+function wattsToKwh(watts, deltaMinutes) {
+  return (Number(watts) * deltaMinutes) / 60000;
 }
 
 function ratePerMinuteToKwPerHour(value) {
@@ -369,11 +380,11 @@ function renderTopbarGauge(samples) {
 
   if (topbarGauge) {
     topbarGauge.style.setProperty("--ring-progress", `${bleProgress}turn`);
-    topbarGauge.style.setProperty("--core-fill", getInfernoSolarColor(solarRate, 5));
+    topbarGauge.style.setProperty("--core-fill", getInfernoSolarColorFromWatts(solarRate, 5));
     topbarGauge.style.setProperty("--inner-ring-stroke", "rgba(240, 244, 255, 0.1)");
   }
   if (topbarSolarValue) {
-    topbarSolarValue.textContent = formatGaugeKwPerHour(solarRate);
+    topbarSolarValue.textContent = formatGaugeKwPerHourFromWatts(solarRate);
   }
   if (topbarBleValue) {
     topbarBleValue.textContent = bleRate === null ? "BLE n/a" : `BLE ${formatGaugeKwPerHour(bleRate)}`;
@@ -393,7 +404,7 @@ function renderBydTopbarGauge(samples, pollers) {
     topbarBydGauge.style.setProperty("--inner-ring-stroke", "rgba(255, 214, 181, 0.09)");
   }
   if (topbarBydValue) {
-    topbarBydValue.textContent = formatGaugeKwFromWatts(glRate);
+    topbarBydValue.textContent = formatGaugeKwPerHourFromWatts(glRate);
   }
   if (topbarBydSubvalue) {
     topbarBydSubvalue.textContent = socPercent === null ? "SoC n/a" : `SoC ${socPercent.toFixed(0)}%`;
@@ -593,7 +604,7 @@ function getBydPowerSeries(items) {
     .map((item) => item.movement_suppressed
       ? { ...item, power_w: 0, charging_rate_w_per_min: 0 }
       : item)
-    .filter((item) => item.charging_rate_w_per_min !== null);
+    .filter((item) => item.power_w !== null || item.charging_rate_w_per_min !== null);
 }
 
 function getChartHeight() {
@@ -792,7 +803,7 @@ function formatMetricReading(label, value) {
   `;
 }
 
-function formatMetricReadingWatts(label, value) {
+function formatMetricReadingPower(label, value) {
   if (value === null || value === undefined || Number.isNaN(Number(value))) {
     return `
       <div class="metric-reading">
@@ -805,8 +816,8 @@ function formatMetricReadingWatts(label, value) {
   return `
     <div class="metric-reading">
       <span class="metric-reading-label">${label}</span>
-      <strong class="metric-reading-main">${formatKwPerHour(value)}</strong>
-      <small class="metric-reading-sub">${formatRatePerMinute(value)}</small>
+      <strong class="metric-reading-main">${formatGaugeKwPerHourFromWatts(value)}</strong>
+      <small class="metric-reading-sub">${formatWattsPerHour(value)}</small>
     </div>
   `;
 }
@@ -815,7 +826,7 @@ function formatMetricCard(item) {
   const isImputed = item.raw_payload && item.raw_payload.imputed;
   if (item.source === "byd_ev") {
     const payload = item.raw_payload || {};
-    const chargingRate = getBydChargingRate(item);
+    const chargingPower = getBydPowerWatts(item);
     const etaMinutes = payload.time_to_full_minutes;
     const etaText = etaMinutes === null || etaMinutes === undefined
       ? "n/a"
@@ -823,7 +834,7 @@ function formatMetricCard(item) {
     return `
       <article class="metric-card">
         <span>byd_ev</span>
-        ${formatMetricReading("BYD EV", chargingRate)}
+        ${formatMetricReadingPower("BYD EV", chargingPower)}
         <small>SoC: ${payload.soc_percent === null || payload.soc_percent === undefined ? "n/a" : `${Number(payload.soc_percent).toFixed(0)}%`}</small>
         <small>Range: ${payload.range_km === null || payload.range_km === undefined ? "n/a" : `${Number(payload.range_km).toFixed(0)} km`}</small>
         <small>Charge ETA: ${etaText}</small>
@@ -836,8 +847,8 @@ function formatMetricCard(item) {
   return `
     <article class="metric-card">
       <span>${item.source}</span>
-      ${formatMetricReadingWatts("Grid", item.grid_usage_watts)}
-      ${formatMetricReadingWatts("Solar", item.solar_generation_watts)}
+      ${item.source === "local_site" ? formatMetricReadingPower("Grid", item.grid_usage_watts) : formatMetricReading("Grid", item.grid_usage_watts)}
+      ${item.source === "local_site" ? formatMetricReadingPower("Solar", item.solar_generation_watts) : formatMetricReading("Solar", item.solar_generation_watts)}
       <small>${isImputed ? "Estimated from previous readings" : "Live reading"}</small>
       <small>${formatDateTime(item.observed_at)}</small>
     </article>
@@ -1208,7 +1219,9 @@ function getTodayAndWeekTotals(items) {
     solarSeries,
     "solar_generation_watts",
     getDayKey,
-    getStartOfNextDay
+    getStartOfNextDay,
+    null,
+    wattsToKwh
   );
   const gridDailyTotals = buildEnergyTotals(
     gridSeries,
@@ -1226,7 +1239,9 @@ function getTodayAndWeekTotals(items) {
     solarSeries,
     "solar_generation_watts",
     getWeekKey,
-    getStartOfNextWeek
+    getStartOfNextWeek,
+    null,
+    wattsToKwh
   );
   const gridWeeklyTotals = buildEnergyTotals(
     gridSeries,
@@ -1244,7 +1259,9 @@ function getTodayAndWeekTotals(items) {
     solarSeries,
     "solar_generation_watts",
     getMonthKey,
-    getStartOfNextMonth
+    getStartOfNextMonth,
+    null,
+    wattsToKwh
   );
   const gridMonthlyTotals = buildEnergyTotals(
     gridSeries,
@@ -1329,14 +1346,14 @@ function buildSummaryData(items, windowState) {
   return {
     series,
     cumulative: {
-      solar: integrateSeriesKwh(series.solar, "solar_generation_watts", windowState),
+      solar: integrateSeriesKwh(series.solar, "solar_generation_watts", windowState, wattsToKwh),
       grid: integrateSeriesKwh(series.grid, "grid_usage_watts", windowState),
       ev: integrateSeriesKwh(series.ev, "charging_rate_w_per_min", windowState)
     },
     generation: {
-      hourly: buildEnergyTotals(series.solar, "solar_generation_watts", getHourKey, getStartOfNextHour, hourlyWindow),
-      daily: buildEnergyTotals(series.solar, "solar_generation_watts", getDayKey, getStartOfNextDay, dailyWindow),
-      weekly: buildEnergyTotals(series.solar, "solar_generation_watts", getWeekKey, getStartOfNextWeek, weeklyWindow)
+      hourly: buildEnergyTotals(series.solar, "solar_generation_watts", getHourKey, getStartOfNextHour, hourlyWindow, wattsToKwh),
+      daily: buildEnergyTotals(series.solar, "solar_generation_watts", getDayKey, getStartOfNextDay, dailyWindow, wattsToKwh),
+      weekly: buildEnergyTotals(series.solar, "solar_generation_watts", getWeekKey, getStartOfNextWeek, weeklyWindow, wattsToKwh)
     }
   };
 }
@@ -1616,9 +1633,9 @@ function renderBleSolarChart(items) {
       label: "Site solar",
       data: siteSolar.map((item) => ({
         x: toChartTime(item.observed_at).getTime(),
-        y: ratePerMinuteToKwPerHour(item.solar_generation_watts),
+        y: wattsToKw(item.solar_generation_watts),
         raw: Number(item.solar_generation_watts),
-        rawUnit: "W/min"
+        rawUnit: "W/hr"
       })),
       borderColor: dark ? "#8ee29d" : "#7cc98a",
       backgroundColor: dark ? "rgba(142, 226, 157, 0.12)" : "rgba(124, 201, 138, 0.12)",
@@ -1628,9 +1645,9 @@ function renderBleSolarChart(items) {
       label: "BYD EV",
       data: evItems.map((item) => ({
         x: toChartTime(item.observed_at).getTime(),
-        y: ratePerMinuteToKwPerHour(item.charging_rate_w_per_min),
-        raw: Number(item.charging_rate_w_per_min),
-        rawUnit: "W/min"
+        y: wattsToKw(item.power_w),
+        raw: Number(item.power_w),
+        rawUnit: "W/hr"
       })),
       borderColor: dark ? "#ffb45b" : "#d6882e",
       backgroundColor: "rgba(0,0,0,0)",
