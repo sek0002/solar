@@ -1868,26 +1868,23 @@ themeToggle.addEventListener("click", () => {
 
 windowPreset.addEventListener("change", () => {
   if (windowPreset.value !== "custom") {
+    setRangeMode("live");
     syncWindowControls(windowPreset.value);
-    if (!isFixedRange()) {
-      applyDefaultStartDateTime(windowPreset.value);
-    }
+    applyDefaultStartDateTime(windowPreset.value);
     scheduleRefresh(0);
   }
 });
 
 hoursInput.addEventListener("input", () => {
+  setRangeMode("live");
   syncWindowControls(hoursInput.value);
-  if (!isFixedRange()) {
-    applyDefaultStartDateTime(hoursInput.value);
-  }
+  applyDefaultStartDateTime(hoursInput.value);
   scheduleRefresh(200);
 });
 hoursInput.addEventListener("change", () => {
+  setRangeMode("live");
   syncWindowControls(hoursInput.value);
-  if (!isFixedRange()) {
-    applyDefaultStartDateTime(hoursInput.value);
-  }
+  applyDefaultStartDateTime(hoursInput.value);
   scheduleRefresh(0);
 });
 
