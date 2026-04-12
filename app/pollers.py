@@ -31,6 +31,12 @@ NOTIFY_CHAR = "59da0001-12f4-25a6-7d4f-55961dce4205"
 BATTERY_CHAR = "00002a19-0000-1000-8000-00805f9b34fb"
 
 
+def watts_to_rate_per_minute(value: Optional[float]) -> Optional[float]:
+    if value is None:
+        return None
+    return float(value) / 60.0
+
+
 @dataclass
 class PollerStatus:
     name: str
@@ -137,12 +143,13 @@ class PowerpalBlePoller:
         utc_time = datetime.fromtimestamp(timestamp, tz=timezone.utc)
         return {
             "observed_at": utc_time.astimezone(self._melbourne_tz),
-            "grid_usage_watts": usage_watts,
+            "grid_usage_watts": watts_to_rate_per_minute(usage_watts),
+            "grid_usage_power_w": usage_watts,
             "raw_bytes_hex": data.hex(),
             "pulse_byte_4": int_array[4],
             "pulse_byte_5": int_array[5],
             "pulse_sum": pulse_sum,
-            "original_test2_formula": "grid_usage_watts = (byte4 + byte5) / 0.8",
+            "original_test2_formula": "grid_usage_power_w = (byte4 + byte5) / 0.8",
         }
 
     async def run(self) -> None:
@@ -586,8 +593,10 @@ class LocalSitePoller:
 
         return {
             "content_type": response.headers.get("content-type"),
-            "grid_usage_watts": grid_usage,
-            "solar_generation_watts": solar_generation,
+            "grid_usage_watts": watts_to_rate_per_minute(grid_usage),
+            "solar_generation_watts": watts_to_rate_per_minute(solar_generation),
+            "grid_usage_power_w": grid_usage,
+            "solar_generation_power_w": solar_generation,
             "url": self.settings.local_site_url,
         }
 
@@ -826,8 +835,10 @@ class NetworkBlePoller:
         remote_observed_at = read_line(self.settings.network_ble_timestamp_line_index)
         remote_state = read_line(self.settings.network_ble_state_line_index)
 
+        usage_watts = float(usage_text)
         return {
-            "grid_usage_watts": float(usage_text),
+            "grid_usage_watts": watts_to_rate_per_minute(usage_watts),
+            "grid_usage_power_w": usage_watts,
             "battery_percent": int(float(battery_text)) if battery_text not in (None, "") else None,
             "remote_observed_at": remote_observed_at,
             "remote_state": remote_state,

@@ -324,7 +324,28 @@ function getInfernoSolarColor(ratePerMinute, maxKwPerHour = 5) {
     { t: 0.75, color: [249, 142, 8] },
     { t: 1.0, color: [252, 255, 164] }
   ];
-  const normalized = clamp(wattsToKw(ratePerMinute) / maxKwPerHour, 0, 1);
+  const normalized = clamp(ratePerMinuteToKwPerHour(ratePerMinute) / maxKwPerHour, 0, 1);
+  const upperIndex = stops.findIndex((stop) => stop.t >= normalized);
+  const upper = upperIndex === -1 ? stops[stops.length - 1] : stops[upperIndex];
+  const lower = upperIndex <= 0 ? stops[0] : stops[upperIndex - 1];
+  const span = upper.t - lower.t || 1;
+  const mix = (normalized - lower.t) / span;
+  const channels = lower.color.map((channel, index) => Math.round(channel + (upper.color[index] - channel) * mix));
+  return `rgb(${channels[0]}, ${channels[1]}, ${channels[2]})`;
+}
+
+function getInfernoSolarColorFromWatts(watts, maxKw = 5) {
+  if (watts === null || watts === undefined || Number.isNaN(Number(watts))) {
+    return "#4c1d4b";
+  }
+  const stops = [
+    { t: 0.0, color: [27, 12, 65] },
+    { t: 0.25, color: [100, 19, 113] },
+    { t: 0.5, color: [187, 55, 84] },
+    { t: 0.75, color: [249, 142, 8] },
+    { t: 1.0, color: [252, 255, 164] }
+  ];
+  const normalized = clamp(wattsToKw(watts) / maxKw, 0, 1);
   const upperIndex = stops.findIndex((stop) => stop.t >= normalized);
   const upper = upperIndex === -1 ? stops[stops.length - 1] : stops[upperIndex];
   const lower = upperIndex <= 0 ? stops[0] : stops[upperIndex - 1];
@@ -344,7 +365,7 @@ function getLatestRateBySource(samples, source, valueKey) {
 function renderTopbarGauge(samples) {
   const solarRate = getLatestRateBySource(samples, "local_site", "solar_generation_watts");
   const bleRate = getLatestRateBySource(samples, "ble", "grid_usage_watts");
-  const bleProgress = clamp((bleRate === null ? 0 : wattsToKw(bleRate) / 10), 0, 1);
+  const bleProgress = clamp((bleRate === null ? 0 : ratePerMinuteToKwPerHour(bleRate) / 10), 0, 1);
 
   if (topbarGauge) {
     topbarGauge.style.setProperty("--ring-progress", `${bleProgress}turn`);
@@ -352,10 +373,10 @@ function renderTopbarGauge(samples) {
     topbarGauge.style.setProperty("--inner-ring-stroke", "rgba(240, 244, 255, 0.1)");
   }
   if (topbarSolarValue) {
-    topbarSolarValue.textContent = formatGaugeKwFromWatts(solarRate);
+    topbarSolarValue.textContent = formatGaugeKwPerHour(solarRate);
   }
   if (topbarBleValue) {
-    topbarBleValue.textContent = bleRate === null ? "BLE n/a" : `BLE ${formatGaugeKwFromWatts(bleRate)}`;
+    topbarBleValue.textContent = bleRate === null ? "BLE n/a" : `BLE ${formatGaugeKwPerHour(bleRate)}`;
   }
 }
 
@@ -368,7 +389,7 @@ function renderBydTopbarGauge(samples, pollers) {
 
   if (topbarBydGauge) {
     topbarBydGauge.style.setProperty("--ring-progress", `${socProgress}turn`);
-    topbarBydGauge.style.setProperty("--core-fill", getInfernoSolarColor(glRate, 3));
+    topbarBydGauge.style.setProperty("--core-fill", getInfernoSolarColorFromWatts(glRate, 3));
     topbarBydGauge.style.setProperty("--inner-ring-stroke", "rgba(255, 214, 181, 0.09)");
   }
   if (topbarBydValue) {
@@ -771,6 +792,25 @@ function formatMetricReading(label, value) {
   `;
 }
 
+function formatMetricReadingWatts(label, value) {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) {
+    return `
+      <div class="metric-reading">
+        <span class="metric-reading-label">${label}</span>
+        <strong class="metric-reading-main">n/a</strong>
+        <small class="metric-reading-sub">n/a</small>
+      </div>
+    `;
+  }
+  return `
+    <div class="metric-reading">
+      <span class="metric-reading-label">${label}</span>
+      <strong class="metric-reading-main">${formatKwPerHour(value)}</strong>
+      <small class="metric-reading-sub">${formatRatePerMinute(value)}</small>
+    </div>
+  `;
+}
+
 function formatMetricCard(item) {
   const isImputed = item.raw_payload && item.raw_payload.imputed;
   if (item.source === "byd_ev") {
@@ -796,8 +836,8 @@ function formatMetricCard(item) {
   return `
     <article class="metric-card">
       <span>${item.source}</span>
-      ${formatMetricReading("Grid", item.grid_usage_watts)}
-      ${formatMetricReading("Solar", item.solar_generation_watts)}
+      ${formatMetricReadingWatts("Grid", item.grid_usage_watts)}
+      ${formatMetricReadingWatts("Solar", item.solar_generation_watts)}
       <small>${isImputed ? "Estimated from previous readings" : "Live reading"}</small>
       <small>${formatDateTime(item.observed_at)}</small>
     </article>
@@ -982,6 +1022,10 @@ function formatWeekBucketLabel(bucketKey) {
 }
 
 function splitEnergyAcrossBuckets(startDate, endDate, averageRate, keyBuilder, nextBoundaryBuilder) {
+  return splitEnergyAcrossBucketsWithConverter(startDate, endDate, averageRate, keyBuilder, nextBoundaryBuilder, ratePerMinuteToKwh);
+}
+
+function splitEnergyAcrossBucketsWithConverter(startDate, endDate, averageRate, keyBuilder, nextBoundaryBuilder, energyConverter) {
   const segments = [];
   let cursor = new Date(startDate);
 
@@ -993,7 +1037,7 @@ function splitEnergyAcrossBuckets(startDate, endDate, averageRate, keyBuilder, n
       segments.push({
         bucketKey: keyBuilder(cursor),
         observed_at: segmentEnd.toISOString(),
-        energy_kwh: ratePerMinuteToKwh(averageRate, deltaMinutes)
+        energy_kwh: energyConverter(averageRate, deltaMinutes)
       });
     }
     cursor = segmentEnd;
@@ -1007,7 +1051,8 @@ function buildEnergySegments(
   valueKey,
   keyBuilder = getDayKey,
   nextBoundaryBuilder = getStartOfNextDay,
-  windowState = null
+  windowState = null,
+  energyConverter = ratePerMinuteToKwh
 ) {
   const segments = [];
   for (let index = 1; index < series.length; index += 1) {
@@ -1023,12 +1068,13 @@ function buildEnergySegments(
     }
     const averageRate = (Number(previous[valueKey]) + Number(current[valueKey])) / 2;
     segments.push(
-      ...splitEnergyAcrossBuckets(
+      ...splitEnergyAcrossBucketsWithConverter(
         clippedInterval.start,
         clippedInterval.end,
         averageRate,
         keyBuilder,
-        nextBoundaryBuilder
+        nextBoundaryBuilder,
+        energyConverter
       )
     );
   }
@@ -1040,16 +1086,17 @@ function buildEnergyTotals(
   valueKey,
   keyBuilder = getDayKey,
   nextBoundaryBuilder = getStartOfNextDay,
-  windowState = null
+  windowState = null,
+  energyConverter = ratePerMinuteToKwh
 ) {
   const totals = new Map();
-  buildEnergySegments(series, valueKey, keyBuilder, nextBoundaryBuilder, windowState).forEach((segment) => {
+  buildEnergySegments(series, valueKey, keyBuilder, nextBoundaryBuilder, windowState, energyConverter).forEach((segment) => {
     totals.set(segment.bucketKey, (totals.get(segment.bucketKey) || 0) + Number(segment.energy_kwh || 0));
   });
   return totals;
 }
 
-function integrateSeriesKwh(series, valueKey, windowState = null) {
+function integrateSeriesKwh(series, valueKey, windowState = null, energyConverter = ratePerMinuteToKwh) {
   let cumulative = 0;
   const points = [];
   let currentDayKey = null;
@@ -1075,7 +1122,7 @@ function integrateSeriesKwh(series, valueKey, windowState = null) {
         : { start: previousDate, end: currentDate };
       if (clippedInterval) {
         const averageRate = (Number(previous[valueKey]) + Number(current[valueKey])) / 2;
-        const dayEnergy = splitEnergyAcrossBuckets(clippedInterval.start, clippedInterval.end, averageRate, getDayKey, getStartOfNextDay)
+        const dayEnergy = splitEnergyAcrossBucketsWithConverter(clippedInterval.start, clippedInterval.end, averageRate, getDayKey, getStartOfNextDay, energyConverter)
           .filter((segment) => segment.bucketKey === dayKey)
           .reduce((sum, segment) => sum + segment.energy_kwh, 0);
         cumulative += dayEnergy;
@@ -1449,7 +1496,8 @@ function createLineChart(element, datasets, tooltipMode = "rate") {
                 return `${context.dataset.label}: ${Number(context.raw.y || 0).toFixed(3)} kWh`;
               }
               const rawRate = context.raw.raw;
-              return `${context.dataset.label}: ${Number(context.raw.y || 0).toFixed(3)} kW/hr (${Number(rawRate || 0).toFixed(1)} W/min)`;
+              const rawUnit = context.raw.rawUnit || "W";
+              return `${context.dataset.label}: ${Number(context.raw.y || 0).toFixed(3)} kW/hr (${Number(rawRate || 0).toFixed(1)} ${rawUnit})`;
             }
           }
         }
@@ -1557,7 +1605,8 @@ function renderBleSolarChart(items) {
       data: bleGrid.map((item) => ({
         x: toChartTime(item.observed_at).getTime(),
         y: ratePerMinuteToKwPerHour(item.grid_usage_watts),
-        raw: Number(item.grid_usage_watts)
+        raw: Number(item.grid_usage_watts),
+        rawUnit: "W/min"
       })),
       borderColor: dark ? "#7fb0ff" : "#6f96d8",
       backgroundColor: dark ? "rgba(127, 176, 255, 0.16)" : "rgba(111, 150, 216, 0.17)",
@@ -1568,7 +1617,8 @@ function renderBleSolarChart(items) {
       data: siteSolar.map((item) => ({
         x: toChartTime(item.observed_at).getTime(),
         y: ratePerMinuteToKwPerHour(item.solar_generation_watts),
-        raw: Number(item.solar_generation_watts)
+        raw: Number(item.solar_generation_watts),
+        rawUnit: "W/min"
       })),
       borderColor: dark ? "#8ee29d" : "#7cc98a",
       backgroundColor: dark ? "rgba(142, 226, 157, 0.12)" : "rgba(124, 201, 138, 0.12)",
@@ -1579,7 +1629,8 @@ function renderBleSolarChart(items) {
       data: evItems.map((item) => ({
         x: toChartTime(item.observed_at).getTime(),
         y: ratePerMinuteToKwPerHour(item.charging_rate_w_per_min),
-        raw: Number(item.charging_rate_w_per_min)
+        raw: Number(item.charging_rate_w_per_min),
+        rawUnit: "W/min"
       })),
       borderColor: dark ? "#ffb45b" : "#d6882e",
       backgroundColor: "rgba(0,0,0,0)",
