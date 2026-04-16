@@ -27,11 +27,13 @@ const weeklyChartElement = document.querySelector("#weekly-chart");
 const appTimezone = window.SOLAR_MONITOR_CONFIG.timezoneName || "Australia/Melbourne";
 const uiStateKey = "solar-monitor-ui-state";
 const appCacheVersionKey = "solar-monitor-cache-version";
+const refreshCacheKey = "solar-monitor-last-refresh";
 const appCacheVersion = (window.SOLAR_PWA && window.SOLAR_PWA.appVersion) || "dev";
 const pageLoadDefaultHours = 12;
 
 function resetVersionedClientCache() {
   localStorage.removeItem(uiStateKey);
+  sessionStorage.removeItem(refreshCacheKey);
   if ("caches" in window) {
     caches.keys()
       .then((keys) => Promise.all(keys.map((key) => caches.delete(key))))
@@ -1817,6 +1819,114 @@ function renderEmptyCharts() {
   renderChartPlaceholder(weeklyChartElement, "No weekly generation data available");
 }
 
+function buildRefreshRequest(hours, safeStart, end) {
+  return {
+    hours: clampHours(hours),
+    mode: isFixedRange() ? "fixed" : "live",
+    start: safeStart.toISOString(),
+    end: end.toISOString()
+  };
+}
+
+function loadRefreshCache() {
+  try {
+    return JSON.parse(sessionStorage.getItem(refreshCacheKey) || "null");
+  } catch (error) {
+    console.warn("Unable to parse cached refresh payload", error);
+    return null;
+  }
+}
+
+function saveRefreshCache(payload) {
+  try {
+    sessionStorage.setItem(refreshCacheKey, JSON.stringify(payload));
+  } catch (error) {
+    console.warn("Unable to persist cached refresh payload", error);
+  }
+}
+
+function isCachedRefreshUsable(cachedPayload, request) {
+  if (!cachedPayload || !cachedPayload.request || !cachedPayload.cachedAt) {
+    return false;
+  }
+
+  const cachedAt = new Date(cachedPayload.cachedAt).getTime();
+  if (!Number.isFinite(cachedAt)) {
+    return false;
+  }
+
+  const ageMs = Date.now() - cachedAt;
+  if (ageMs > 2 * 60 * 1000) {
+    return false;
+  }
+
+  if (cachedPayload.request.mode !== request.mode) {
+    return false;
+  }
+
+  if (Number(cachedPayload.request.hours) !== Number(request.hours)) {
+    return false;
+  }
+
+  if (request.mode === "fixed") {
+    return cachedPayload.request.start === request.start && cachedPayload.request.end === request.end;
+  }
+
+  return true;
+}
+
+function renderDashboardState(statusPayload, items, windowState, refreshLabel) {
+  renderStatusCards(statusPayload.pollers);
+  renderCollectorStrip(statusPayload.pollers);
+  latestValues.innerHTML = statusPayload.latest_samples
+    .filter((item) => item.source !== "tuya_ev")
+    .map(formatMetricCard)
+    .join("");
+  renderTopbarGauge(statusPayload.latest_samples);
+  renderBydTopbarGauge(statusPayload.latest_samples, statusPayload.pollers);
+  renderBleBatteryState(statusPayload.pollers);
+  renderEvBatteryState(statusPayload.latest_samples, statusPayload.pollers);
+
+  if (!items.length) {
+    totalsTableBody.innerHTML = `
+      <tr><td>Daily</td><td>0.00 kWh</td><td>0.00 kWh</td><td>0.00 kWh</td><td>0.00 kWh</td></tr>
+      <tr><td>Weekly</td><td>0.00 kWh</td><td>0.00 kWh</td><td>0.00 kWh</td><td>0.00 kWh</td></tr>
+      <tr><td>Monthly</td><td>0.00 kWh</td><td>0.00 kWh</td><td>0.00 kWh</td><td>0.00 kWh</td></tr>
+    `;
+    renderEmptyCharts();
+    refreshText.textContent = refreshLabel || "No data in selected window";
+    return;
+  }
+
+  renderCumulativeStats(items, statusPayload.pollers);
+  const chartsRendered = renderDashboardCharts(items, windowState);
+  refreshText.textContent = chartsRendered
+    ? refreshLabel
+    : "Updated with chart fallback";
+}
+
+function renderCachedDashboardIfAvailable(hours, safeStart, end) {
+  const request = buildRefreshRequest(hours, safeStart, end);
+  const cachedPayload = loadRefreshCache();
+  if (!isCachedRefreshUsable(cachedPayload, request)) {
+    return false;
+  }
+
+  const items = Array.isArray(cachedPayload.items) ? cachedPayload.items : [];
+  const statusPayload = cachedPayload.statusPayload;
+  if (!statusPayload || !Array.isArray(statusPayload.pollers) || !Array.isArray(statusPayload.latest_samples)) {
+    return false;
+  }
+
+  renderDashboardState(
+    statusPayload,
+    items,
+    buildWindowState(safeStart, end),
+    `Showing cached data from ${new Date(cachedPayload.cachedAt).toLocaleTimeString("en-AU", { timeZone: appTimezone })}`
+  );
+  return true;
+}
+
 async function refresh() {
   try {
     const hours = syncWindowControls(hoursInput.value || window.SOLAR_MONITOR_CONFIG.defaultHours || 24);
@@ -1834,6 +1944,7 @@ async function refresh() {
     }
     const end = new Date(safeStart.getTime() + hours * 3600000);
     const windowState = buildWindowState(safeStart, end);
+    const request = buildRefreshRequest(hours, safeStart, end);
     const fetchLimit = getSamplesFetchLimit(hours);
     const [statusResponse, samplesResponse] = await Promise.all([
       fetch("/api/status"),
@@ -1848,33 +1959,20 @@ async function refresh() {
     const samplesPayload = await samplesResponse.json();
     const items = Array.isArray(samplesPayload.items) ? samplesPayload.items : [];
 
-    renderStatusCards(statusPayload.pollers);
-    renderCollectorStrip(statusPayload.pollers);
-    latestValues.innerHTML = statusPayload.latest_samples
-      .filter((item) => item.source !== "tuya_ev")
-      .map(formatMetricCard)
-      .join("");
-    renderTopbarGauge(statusPayload.latest_samples);
-    renderBydTopbarGauge(statusPayload.latest_samples, statusPayload.pollers);
-    renderBleBatteryState(statusPayload.pollers);
-    renderEvBatteryState(statusPayload.latest_samples, statusPayload.pollers);
-
-    if (!items.length) {
-      totalsTableBody.innerHTML = `
-        <tr><td>Daily</td><td>0.00 kWh</td><td>0.00 kWh</td><td>0.00 kWh</td><td>0.00 kWh</td></tr>
-        <tr><td>Weekly</td><td>0.00 kWh</td><td>0.00 kWh</td><td>0.00 kWh</td><td>0.00 kWh</td></tr>
-        <tr><td>Monthly</td><td>0.00 kWh</td><td>0.00 kWh</td><td>0.00 kWh</td><td>0.00 kWh</td></tr>
-      `;
-      renderEmptyCharts();
-      refreshText.textContent = "No data in selected window";
-      return;
-    }
-
-    renderCumulativeStats(items, statusPayload.pollers);
-    const chartsRendered = renderDashboardCharts(items, windowState);
-    refreshText.textContent = chartsRendered
-      ? `Updated ${new Date().toLocaleTimeString("en-AU", { timeZone: appTimezone })}`
-      : "Updated with chart fallback";
+    saveRefreshCache({
+      request,
+      cachedAt: new Date().toISOString(),
+      statusPayload,
+      items
+    });
+    renderDashboardState(
+      statusPayload,
+      items,
+      windowState,
+      items.length
+        ? `Updated ${new Date().toLocaleTimeString("en-AU", { timeZone: appTimezone })}`
+        : "No data in selected window"
+    );
   } catch (error) {
     console.error("Refresh failed", error);
     renderEmptyCharts();
@@ -1915,6 +2013,16 @@ if (isFixedRange()) {
   applyDefaultStartDateTime(hoursInput.value || pageLoadDefaultHours);
 }
 bindStatusCardPersistence();
+
+{
+  const hours = syncWindowControls(hoursInput.value || window.SOLAR_MONITOR_CONFIG.defaultHours || 24);
+  const safeStart = isFixedRange()
+    ? buildAppDateTime(startDateInput.value, startTimeInput.value || "00:00")
+    : getDefaultStartDateTime(hours);
+  const usableStart = Number.isNaN(safeStart.getTime()) ? getDefaultStartDateTime(hours) : safeStart;
+  const end = new Date(usableStart.getTime() + hours * 3600000);
+  renderCachedDashboardIfAvailable(hours, usableStart, end);
+}
 
 themeToggle.addEventListener("click", () => {
   const nextTheme = getTheme() === "dark" ? "light" : "dark";
