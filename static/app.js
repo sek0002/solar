@@ -36,6 +36,18 @@ const appCacheVersionKey = "solar-monitor-cache-version";
 const refreshCacheKey = "solar-monitor-last-refresh";
 const appCacheVersion = (window.SOLAR_PWA && window.SOLAR_PWA.appVersion) || "dev";
 const pageLoadDefaultHours = 12;
+let chargerCommandInFlight = false;
+let chargerPendingMessage = "";
+
+function setChargerControlsBusy(isBusy) {
+  chargerCommandInFlight = isBusy;
+  if (chargerToggle) {
+    chargerToggle.disabled = isBusy;
+  }
+  chargerCurrentOptions.forEach((option) => {
+    option.disabled = isBusy;
+  });
+}
 
 function resetVersionedClientCache() {
   localStorage.removeItem(uiStateKey);
@@ -438,13 +450,41 @@ function getChargerEnabledState(chargerState) {
   if (!chargerState) {
     return null;
   }
-  if (chargerState.workState === "charger_charging") {
+  if (["charger_charging", "charger_wait"].includes(chargerState.workState)) {
     return true;
   }
-  if (chargerState.workState === "charge_end") {
+  if (["charge_end", "charger_free"].includes(chargerState.workState)) {
     return false;
   }
   return chargerState.enabled;
+}
+
+function getChargerStatusLabel(chargerState, isEnabled) {
+  if (chargerCommandInFlight && chargerPendingMessage) {
+    return chargerPendingMessage;
+  }
+  if (!chargerState) {
+    return "Charger n/a";
+  }
+  if (chargerState.workState === "charger_charging") {
+    return "charging";
+  }
+  if (chargerState.workState === "charger_wait") {
+    return "charger wait";
+  }
+  if (chargerState.workState === "charge_end") {
+    return "charge end";
+  }
+  if (chargerState.workState === "charger_free") {
+    return "charger free";
+  }
+  if (isEnabled === true) {
+    return "charging";
+  }
+  if (isEnabled === false) {
+    return "off";
+  }
+  return "Charger n/a";
 }
 
 function renderChargerToggle(samples) {
@@ -465,12 +505,9 @@ function renderChargerToggle(samples) {
   const chargerState = getTuyaSwitchState(samples);
   const isEnabled = getChargerEnabledState(chargerState);
   chargerToggle.checked = isEnabled === true;
+  chargerToggle.disabled = chargerCommandInFlight;
   if (chargerToggleStatus) {
-    chargerToggleStatus.textContent = isEnabled === null
-      ? "Charger n/a"
-      : isEnabled
-        ? (chargerState.workState || "charger_charging").replace(/_/g, " ")
-        : (chargerState.workState || "charge_end").replace(/_/g, " ");
+    chargerToggleStatus.textContent = getChargerStatusLabel(chargerState, isEnabled);
   }
   chargerToggle.title = chargerToggleStatus ? chargerToggleStatus.textContent : "";
   chargerCurrentOptions.forEach((button) => {
@@ -479,6 +516,7 @@ function renderChargerToggle(samples) {
     button.classList.toggle("is-active", isActive);
     button.setAttribute("aria-pressed", isActive ? "true" : "false");
     button.title = chargerState.current === null ? "Current unavailable" : `${current}A`;
+    button.disabled = chargerCommandInFlight;
   });
 }
 
@@ -2115,8 +2153,9 @@ resetRangeButton.addEventListener("click", () => {
 if (chargerToggle) {
   chargerToggle.addEventListener("change", async () => {
     const desiredState = chargerToggle.checked;
-    const previousDisabled = chargerToggle.disabled;
-    chargerToggle.disabled = true;
+    chargerPendingMessage = desiredState ? "switching on..." : "switching off...";
+    setChargerControlsBusy(true);
+    renderChargerToggle([]);
     try {
       const response = await fetch("/api/tuya/charger", {
         method: "POST",
@@ -2131,7 +2170,8 @@ if (chargerToggle) {
       console.error("Unable to update charger state", error);
       chargerToggle.checked = !desiredState;
     } finally {
-      chargerToggle.disabled = previousDisabled;
+      chargerPendingMessage = "";
+      setChargerControlsBusy(false);
     }
   });
 }
@@ -2142,9 +2182,9 @@ chargerCurrentOptions.forEach((button) => {
     if (!Number.isFinite(current)) {
       return;
     }
-    chargerCurrentOptions.forEach((option) => {
-      option.disabled = true;
-    });
+    chargerPendingMessage = `setting ${current}A...`;
+    setChargerControlsBusy(true);
+    renderChargerToggle([]);
     try {
       const response = await fetch("/api/tuya/charger/current", {
         method: "POST",
@@ -2158,9 +2198,8 @@ chargerCurrentOptions.forEach((button) => {
     } catch (error) {
       console.error("Unable to update charger current", error);
     } finally {
-      chargerCurrentOptions.forEach((option) => {
-        option.disabled = false;
-      });
+      chargerPendingMessage = "";
+      setChargerControlsBusy(false);
     }
   });
 });

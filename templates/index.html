@@ -50,16 +50,8 @@
             <a class="page-tab is-active" href="/">Dashboard</a>
             <a class="page-tab" href="/byd">BYD</a>
           </nav>
-        </div>
-        <div class="controls-inline-secondary">
-          <button id="reset-range" class="theme-toggle" type="button" aria-label="Reset start time">
-            Reset
-          </button>
-          <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Toggle dark mode">
-            Dark mode
-          </button>
           <div class="topbar-gauges" aria-label="Live topbar gauges">
-            <div id="topbar-gauge" class="topbar-gauge topbar-gauge-compact" aria-label="Solar generation and BLE gauge">
+            <div id="topbar-gauge" class="topbar-gauge" aria-label="Solar generation and BLE gauge">
               <div class="topbar-gauge-ble-ring"></div>
               <div class="topbar-gauge-solar-ring">
                 <div class="topbar-gauge-core">
@@ -70,7 +62,7 @@
               </div>
               <div class="topbar-gauge-inner-ticks"></div>
             </div>
-            <div id="topbar-byd-gauge" class="topbar-gauge topbar-gauge-compact" aria-label="BYD GL and EV SoC gauge">
+            <div id="topbar-byd-gauge" class="topbar-gauge" aria-label="BYD GL and EV SoC gauge">
               <div class="topbar-gauge-byd-ring"></div>
               <div class="topbar-gauge-solar-ring topbar-gauge-byd-solar-ring">
                 <div class="topbar-gauge-core">
@@ -82,6 +74,14 @@
               <div class="topbar-gauge-inner-ticks"></div>
             </div>
           </div>
+        </div>
+        <div class="controls-inline-secondary">
+          <button id="reset-range" class="theme-toggle" type="button" aria-label="Reset start time">
+            Reset
+          </button>
+          <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Toggle dark mode">
+            Dark mode
+          </button>
           <div id="collector-strip" class="collector-strip" aria-label="Collector status summary"></div>
         </div>
       </div>

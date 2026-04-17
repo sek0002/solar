@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import html
 import logging
 import re
@@ -9,6 +10,7 @@ from pathlib import Path
 from typing import Optional
 from urllib.parse import urlencode
 
+import httpx
 from fastapi import FastAPI, Header, HTTPException, Query, Request
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
@@ -26,6 +28,50 @@ templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 database = Database(settings.database_path, settings.timezone_name)
 coordinator = PollingCoordinator(settings, database)
 tuya_client = TuyaCloudClient(settings)
+tuya_command_lock = asyncio.Lock()
+
+
+def _tuya_status_map(status_payload: list[dict[str, object]]) -> dict[str, object]:
+    return {
+        str(item.get("code")): item.get("value")
+        for item in status_payload
+        if isinstance(item, dict) and item.get("code") is not None
+    }
+
+
+def _tuya_is_on(status_map: dict[str, object]) -> bool | None:
+    work_state = str(status_map.get("work_state") or "")
+    if work_state in {"charger_charging", "charger_wait"}:
+        return True
+    if work_state in {"charge_end", "charger_free"}:
+        return False
+    switch_value = status_map.get("switch")
+    return switch_value if isinstance(switch_value, bool) else None
+
+
+async def _tuya_get_status_map(client: httpx.AsyncClient) -> dict[str, object]:
+    return _tuya_status_map(await tuya_client.get_device_status(client))
+
+
+async def _tuya_wait_for_state(
+    client: httpx.AsyncClient,
+    *,
+    desired_on: bool,
+    timeout_seconds: float = 10.0,
+    poll_interval_seconds: float = 1.0,
+) -> dict[str, object]:
+    deadline = asyncio.get_running_loop().time() + timeout_seconds
+    last_status: dict[str, object] = {}
+    while True:
+        last_status = await _tuya_get_status_map(client)
+        if _tuya_is_on(last_status) is desired_on:
+            return last_status
+        if asyncio.get_running_loop().time() >= deadline:
+            raise HTTPException(
+                status_code=504,
+                detail=f"Timed out waiting for charger to reach {'ON' if desired_on else 'OFF'} state",
+            )
+        await asyncio.sleep(poll_interval_seconds)
 
 
 def _static_asset_version(path: str) -> str:
@@ -676,12 +722,14 @@ async def api_tuya_charger(payload: dict[str, object]) -> dict[str, object]:
     if not isinstance(enabled, bool):
         raise HTTPException(status_code=400, detail="Expected boolean 'enabled' field")
 
-    async with httpx.AsyncClient(timeout=settings.tuya_timeout_seconds) as client:
-        result = await tuya_client.send_device_commands(
-            client,
-            [{"code": "switch", "value": enabled}],
-        )
-    return {"status": "ok", "enabled": enabled, "result": result.get("result")}
+    async with tuya_command_lock:
+        async with httpx.AsyncClient(timeout=settings.tuya_timeout_seconds) as client:
+            result = await tuya_client.send_device_commands(
+                client,
+                [{"code": "switch", "value": enabled}],
+            )
+            status_map = await _tuya_wait_for_state(client, desired_on=enabled, timeout_seconds=10.0)
+    return {"status": "ok", "enabled": enabled, "result": result.get("result"), "device_status": status_map}
 
 
 @app.post("/api/tuya/charger/current")
@@ -693,12 +741,42 @@ async def api_tuya_charger_current(payload: dict[str, object]) -> dict[str, obje
     if not isinstance(current, int) or current not in {6, 10, 13}:
         raise HTTPException(status_code=400, detail="Expected integer 'current' field with value 6, 10, or 13")
 
-    async with httpx.AsyncClient(timeout=settings.tuya_timeout_seconds) as client:
-        result = await tuya_client.send_device_commands(
-            client,
-            [{"code": "charge_cur_set", "value": current}],
-        )
-    return {"status": "ok", "current": current, "result": result.get("result")}
+    async with tuya_command_lock:
+        async with httpx.AsyncClient(timeout=settings.tuya_timeout_seconds) as client:
+            initial_status = await _tuya_get_status_map(client)
+            was_on = _tuya_is_on(initial_status) is True
+
+            if was_on:
+                await tuya_client.send_device_commands(
+                    client,
+                    [{"code": "switch", "value": False}],
+                )
+                await _tuya_wait_for_state(client, desired_on=False, timeout_seconds=10.0)
+                await asyncio.sleep(1.0)
+
+            result = await tuya_client.send_device_commands(
+                client,
+                [{"code": "charge_cur_set", "value": current}],
+            )
+            await asyncio.sleep(1.0)
+
+            restored_status: dict[str, object] | None = None
+            if was_on:
+                await tuya_client.send_device_commands(
+                    client,
+                    [{"code": "switch", "value": True}],
+                )
+                restored_status = await _tuya_wait_for_state(client, desired_on=True, timeout_seconds=10.0)
+            else:
+                restored_status = await _tuya_get_status_map(client)
+
+    return {
+        "status": "ok",
+        "current": current,
+        "result": result.get("result"),
+        "was_on": was_on,
+        "device_status": restored_status,
+    }
 
 
 def _check_ingest_token(token: Optional[str]) -> None:
