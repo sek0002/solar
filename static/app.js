@@ -1547,7 +1547,7 @@ function toEnergyMap(sourceTotals) {
 function renderDashboardCharts(items, windowState, cumulativeSeries, energySummary) {
   try {
     renderBleSolarChart(items, windowState);
-    renderCumulativeChart(cumulativeSeries);
+    renderCumulativeChart(cumulativeSeries, windowState);
     renderGenerationSummaryCharts({
       generation: {
         hourly: {
@@ -1638,11 +1638,33 @@ function buildCumulativeWindowState(seriesList) {
   return buildWindowState(new Date(Math.min(...timestamps)), new Date(Math.max(...timestamps)));
 }
 
-function renderCumulativeChart(cumulativeSeries) {
+function filterCumulativeSeriesToWindow(series, windowState) {
+  if (!Array.isArray(series) || !windowState || !windowState.start || !windowState.end) {
+    return Array.isArray(series) ? series : [];
+  }
+
+  const startMs = windowState.start.getTime();
+  const endMs = windowState.end.getTime();
+  return series.filter((item) => {
+    const observedMs = toChartTime(item.observed_at).getTime();
+    return Number.isFinite(observedMs) && observedMs >= startMs && observedMs <= endMs;
+  });
+}
+
+function renderCumulativeChart(cumulativeSeries, windowState) {
   const dark = getTheme() === "dark";
-  const solarKwh = Array.isArray(cumulativeSeries && cumulativeSeries.solar) ? cumulativeSeries.solar : [];
-  const gridKwh = Array.isArray(cumulativeSeries && cumulativeSeries.grid) ? cumulativeSeries.grid : [];
-  const evKwh = Array.isArray(cumulativeSeries && cumulativeSeries.ev) ? cumulativeSeries.ev : [];
+  const solarKwh = filterCumulativeSeriesToWindow(
+    Array.isArray(cumulativeSeries && cumulativeSeries.solar) ? cumulativeSeries.solar : [],
+    windowState
+  );
+  const gridKwh = filterCumulativeSeriesToWindow(
+    Array.isArray(cumulativeSeries && cumulativeSeries.grid) ? cumulativeSeries.grid : [],
+    windowState
+  );
+  const evKwh = filterCumulativeSeriesToWindow(
+    Array.isArray(cumulativeSeries && cumulativeSeries.ev) ? cumulativeSeries.ev : [],
+    windowState
+  );
   const chartWindowState = buildCumulativeWindowState([solarKwh, gridKwh, evKwh]);
 
   if (!solarKwh.length && !gridKwh.length && !evKwh.length) {
@@ -1809,7 +1831,7 @@ function renderDashboardState(statusPayload, items, cumulativeSeries, energySumm
       <tr><td>Monthly</td><td>0.00 kWh</td><td>0.00 kWh</td><td>0.00 kWh</td><td>0.00 kWh</td></tr>
     `;
     renderChartPlaceholder(bleChartElement, "No data in the selected window");
-    renderCumulativeChart(cumulativeSeries);
+    renderCumulativeChart(cumulativeSeries, windowState);
     renderChartPlaceholder(hourlyChartElement, "No hourly generation data available");
     renderChartPlaceholder(dailyChartElement, "No daily generation data available");
     renderChartPlaceholder(weeklyChartElement, "No weekly generation data available");
