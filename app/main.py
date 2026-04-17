@@ -660,6 +660,11 @@ async def api_cumulative() -> dict[str, object]:
     return {"items": database.get_cumulative_samples()}
 
 
+@app.get("/api/energy-summary")
+async def api_energy_summary() -> dict[str, object]:
+    return database.get_energy_summary()
+
+
 def _check_ingest_token(token: Optional[str]) -> None:
     configured = settings.ingest_token.strip()
     if not configured:

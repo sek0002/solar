@@ -1203,124 +1203,32 @@ function renderEvBatteryState(samples, pollers) {
   }
 }
 
-function getTodayAndWeekTotals(items) {
-  const now = new Date();
-  const todayKey = getDayKey(now);
-  const weekKey = getWeekKey(now);
-  const monthKey = getMonthKey(now);
-  const bydItems = getBydPowerSeries(items);
-
-  const solarSeries = items
-    .filter((item) => item.source === "local_site" && item.solar_generation_watts !== null)
-    .sort((left, right) => new Date(left.observed_at) - new Date(right.observed_at));
-  const gridSeries = items
-    .filter((item) => item.source === "ble" && item.grid_usage_watts !== null)
-    .sort((left, right) => new Date(left.observed_at) - new Date(right.observed_at));
-
-  const solarDailyTotals = buildEnergyTotals(
-    solarSeries,
-    "solar_generation_watts",
-    getDayKey,
-    getStartOfNextDay
-  );
-  const gridDailyTotals = buildEnergyTotals(
-    gridSeries,
-    "grid_usage_watts",
-    getDayKey,
-    getStartOfNextDay
-  );
-  const evDailyTotals = buildEnergyTotals(
-    bydItems,
-    "charging_rate_w_per_min",
-    getDayKey,
-    getStartOfNextDay
-  );
-  const solarWeeklyTotals = buildEnergyTotals(
-    solarSeries,
-    "solar_generation_watts",
-    getWeekKey,
-    getStartOfNextWeek
-  );
-  const gridWeeklyTotals = buildEnergyTotals(
-    gridSeries,
-    "grid_usage_watts",
-    getWeekKey,
-    getStartOfNextWeek
-  );
-  const evWeeklyTotals = buildEnergyTotals(
-    bydItems,
-    "charging_rate_w_per_min",
-    getWeekKey,
-    getStartOfNextWeek
-  );
-  const solarMonthlyTotals = buildEnergyTotals(
-    solarSeries,
-    "solar_generation_watts",
-    getMonthKey,
-    getStartOfNextMonth
-  );
-  const gridMonthlyTotals = buildEnergyTotals(
-    gridSeries,
-    "grid_usage_watts",
-    getMonthKey,
-    getStartOfNextMonth
-  );
-  const evMonthlyTotals = buildEnergyTotals(
-    bydItems,
-    "charging_rate_w_per_min",
-    getMonthKey,
-    getStartOfNextMonth
-  );
-
-  const dailySolar = solarDailyTotals.get(todayKey) || 0;
-  const dailyGrid = gridDailyTotals.get(todayKey) || 0;
-  const dailyEv = evDailyTotals.get(todayKey) || 0;
-  const weeklySolar = solarWeeklyTotals.get(weekKey) || 0;
-  const weeklyGrid = gridWeeklyTotals.get(weekKey) || 0;
-  const weeklyEv = evWeeklyTotals.get(weekKey) || 0;
-  const monthlySolar = solarMonthlyTotals.get(monthKey) || 0;
-  const monthlyGrid = gridMonthlyTotals.get(monthKey) || 0;
-  const monthlyEv = evMonthlyTotals.get(monthKey) || 0;
-
-  return {
-    dailySolar,
-    dailyGrid,
-    dailyNet: dailySolar - dailyGrid,
-    weeklySolar,
-    weeklyGrid,
-    weeklyNet: weeklySolar - weeklyGrid,
-    monthlySolar,
-    monthlyGrid,
-    monthlyNet: monthlySolar - monthlyGrid,
-    dailyEv,
-    weeklyEv,
-    monthlyEv
-  };
-}
-
-function renderCumulativeStats(items, pollers = []) {
-  const totals = getTodayAndWeekTotals(items);
+function renderCumulativeStats(energySummary) {
+  const totals = (energySummary && energySummary.totals) || {};
+  const daily = totals.daily || { solar: 0, grid: 0, ev: 0, net: 0 };
+  const weekly = totals.weekly || { solar: 0, grid: 0, ev: 0, net: 0 };
+  const monthly = totals.monthly || { solar: 0, grid: 0, ev: 0, net: 0 };
   totalsTableBody.innerHTML = `
     <tr>
       <td>Daily</td>
-      <td>${totals.dailySolar.toFixed(2)} kWh</td>
-      <td>${totals.dailyGrid.toFixed(2)} kWh</td>
-      <td>${totals.dailyEv.toFixed(2)} kWh</td>
-      <td>${totals.dailyNet.toFixed(2)} kWh</td>
+      <td>${Number(daily.solar || 0).toFixed(2)} kWh</td>
+      <td>${Number(daily.grid || 0).toFixed(2)} kWh</td>
+      <td>${Number(daily.ev || 0).toFixed(2)} kWh</td>
+      <td>${Number(daily.net || 0).toFixed(2)} kWh</td>
     </tr>
     <tr>
       <td>Weekly</td>
-      <td>${totals.weeklySolar.toFixed(2)} kWh</td>
-      <td>${totals.weeklyGrid.toFixed(2)} kWh</td>
-      <td>${totals.weeklyEv.toFixed(2)} kWh</td>
-      <td>${totals.weeklyNet.toFixed(2)} kWh</td>
+      <td>${Number(weekly.solar || 0).toFixed(2)} kWh</td>
+      <td>${Number(weekly.grid || 0).toFixed(2)} kWh</td>
+      <td>${Number(weekly.ev || 0).toFixed(2)} kWh</td>
+      <td>${Number(weekly.net || 0).toFixed(2)} kWh</td>
     </tr>
     <tr>
       <td>Monthly</td>
-      <td>${totals.monthlySolar.toFixed(2)} kWh</td>
-      <td>${totals.monthlyGrid.toFixed(2)} kWh</td>
-      <td>${totals.monthlyEv.toFixed(2)} kWh</td>
-      <td>${totals.monthlyNet.toFixed(2)} kWh</td>
+      <td>${Number(monthly.solar || 0).toFixed(2)} kWh</td>
+      <td>${Number(monthly.grid || 0).toFixed(2)} kWh</td>
+      <td>${Number(monthly.ev || 0).toFixed(2)} kWh</td>
+      <td>${Number(monthly.net || 0).toFixed(2)} kWh</td>
     </tr>
   `;
 }
@@ -1330,34 +1238,6 @@ function getSeriesBySource(items) {
     solar: sortByObservedAt(items.filter((item) => item.source === "local_site" && item.solar_generation_watts !== null)),
     grid: sortByObservedAt(items.filter((item) => item.source === "ble" && item.grid_usage_watts !== null)),
     ev: getBydPowerSeries(items)
-  };
-}
-
-function buildSummaryData(items, windowState) {
-  const series = getSeriesBySource(items);
-  const referenceEnd = new Date(windowState.end);
-  const hourlyWindow = getTrailingWindow(referenceEnd, 24 * 3600000);
-  const dailyWindow = getTrailingWindow(referenceEnd, 7 * 24 * 3600000);
-  const weeklyWindow = getTrailingWindow(referenceEnd, 30 * 24 * 3600000);
-  return {
-    series,
-    generation: {
-      hourly: {
-        solar: buildEnergyTotals(series.solar, "solar_generation_watts", getHourKey, getStartOfNextHour, hourlyWindow),
-        grid: buildEnergyTotals(series.grid, "grid_usage_watts", getHourKey, getStartOfNextHour, hourlyWindow),
-        ev: buildEnergyTotals(series.ev, "charging_rate_w_per_min", getHourKey, getStartOfNextHour, hourlyWindow)
-      },
-      daily: {
-        solar: buildEnergyTotals(series.solar, "solar_generation_watts", getDayKey, getStartOfNextDay, dailyWindow),
-        grid: buildEnergyTotals(series.grid, "grid_usage_watts", getDayKey, getStartOfNextDay, dailyWindow),
-        ev: buildEnergyTotals(series.ev, "charging_rate_w_per_min", getDayKey, getStartOfNextDay, dailyWindow)
-      },
-      weekly: {
-        solar: buildEnergyTotals(series.solar, "solar_generation_watts", getWeekKey, getStartOfNextWeek, weeklyWindow),
-        grid: buildEnergyTotals(series.grid, "grid_usage_watts", getWeekKey, getStartOfNextWeek, weeklyWindow),
-        ev: buildEnergyTotals(series.ev, "charging_rate_w_per_min", getWeekKey, getStartOfNextWeek, weeklyWindow)
-      }
-    }
   };
 }
 
@@ -1660,12 +1540,33 @@ function aggregateLineSeries(points, windowState, maxPoints = 720, mode = "avera
     .filter(Boolean);
 }
 
-function renderDashboardCharts(items, windowState, cumulativeSeries) {
+function toEnergyMap(sourceTotals) {
+  return new Map(Object.entries(sourceTotals || {}));
+}
+
+function renderDashboardCharts(items, windowState, cumulativeSeries, energySummary) {
   try {
-    const summaryData = buildSummaryData(items, windowState);
     renderBleSolarChart(items, windowState);
     renderCumulativeChart(cumulativeSeries);
-    renderGenerationSummaryCharts(summaryData);
+    renderGenerationSummaryCharts({
+      generation: {
+        hourly: {
+          solar: toEnergyMap(energySummary && energySummary.generation && energySummary.generation.hourly && energySummary.generation.hourly.solar),
+          grid: toEnergyMap(energySummary && energySummary.generation && energySummary.generation.hourly && energySummary.generation.hourly.grid),
+          ev: toEnergyMap(energySummary && energySummary.generation && energySummary.generation.hourly && energySummary.generation.hourly.ev)
+        },
+        daily: {
+          solar: toEnergyMap(energySummary && energySummary.generation && energySummary.generation.daily && energySummary.generation.daily.solar),
+          grid: toEnergyMap(energySummary && energySummary.generation && energySummary.generation.daily && energySummary.generation.daily.grid),
+          ev: toEnergyMap(energySummary && energySummary.generation && energySummary.generation.daily && energySummary.generation.daily.ev)
+        },
+        weekly: {
+          solar: toEnergyMap(energySummary && energySummary.generation && energySummary.generation.weekly && energySummary.generation.weekly.solar),
+          grid: toEnergyMap(energySummary && energySummary.generation && energySummary.generation.weekly && energySummary.generation.weekly.grid),
+          ev: toEnergyMap(energySummary && energySummary.generation && energySummary.generation.weekly && energySummary.generation.weekly.ev)
+        }
+      }
+    });
     return true;
   } catch (error) {
     console.error("Chart render failed", error);
@@ -1889,7 +1790,7 @@ function isCachedRefreshUsable(cachedPayload, request) {
   return true;
 }
 
-function renderDashboardState(statusPayload, items, cumulativeSeries, windowState, refreshLabel) {
+function renderDashboardState(statusPayload, items, cumulativeSeries, energySummary, windowState, refreshLabel) {
   renderStatusCards(statusPayload.pollers);
   renderCollectorStrip(statusPayload.pollers);
   latestValues.innerHTML = statusPayload.latest_samples
@@ -1916,8 +1817,8 @@ function renderDashboardState(statusPayload, items, cumulativeSeries, windowStat
     return;
   }
 
-  renderCumulativeStats(items, statusPayload.pollers);
-  const chartsRendered = renderDashboardCharts(items, windowState, cumulativeSeries);
+  renderCumulativeStats(energySummary);
+  const chartsRendered = renderDashboardCharts(items, windowState, cumulativeSeries, energySummary);
   refreshText.textContent = chartsRendered
     ? refreshLabel
     : "Updated with chart fallback";
@@ -1933,6 +1834,7 @@ function renderCachedDashboardIfAvailable(hours, safeStart, end) {
   const items = Array.isArray(cachedPayload.items) ? cachedPayload.items : [];
   const statusPayload = cachedPayload.statusPayload;
   const cumulativeSeries = cachedPayload.cumulativeSeries;
+  const energySummary = cachedPayload.energySummary;
   if (!statusPayload || !Array.isArray(statusPayload.pollers) || !Array.isArray(statusPayload.latest_samples)) {
     return false;
   }
@@ -1941,6 +1843,7 @@ function renderCachedDashboardIfAvailable(hours, safeStart, end) {
     statusPayload,
     items,
     cumulativeSeries,
+    energySummary,
     buildWindowState(safeStart, end),
     `Showing cached data from ${new Date(cachedPayload.cachedAt).toLocaleTimeString("en-AU", { timeZone: appTimezone })}`
   );
@@ -1966,19 +1869,21 @@ async function refresh() {
     const windowState = buildWindowState(safeStart, end);
     const request = buildRefreshRequest(hours, safeStart, end);
     const fetchLimit = getSamplesFetchLimit(hours);
-    const [statusResponse, samplesResponse, cumulativeResponse] = await Promise.all([
+    const [statusResponse, samplesResponse, cumulativeResponse, energySummaryResponse] = await Promise.all([
       fetch("/api/status"),
       fetch(`/api/samples?hours=${hours}&limit=${fetchLimit}&start=${encodeURIComponent(safeStart.toISOString())}&end=${encodeURIComponent(end.toISOString())}`),
-      fetch("/api/cumulative")
+      fetch("/api/cumulative"),
+      fetch("/api/energy-summary")
     ]);
 
-    if (!statusResponse.ok || !samplesResponse.ok || !cumulativeResponse.ok) {
-      throw new Error(`HTTP ${statusResponse.status}/${samplesResponse.status}/${cumulativeResponse.status}`);
+    if (!statusResponse.ok || !samplesResponse.ok || !cumulativeResponse.ok || !energySummaryResponse.ok) {
+      throw new Error(`HTTP ${statusResponse.status}/${samplesResponse.status}/${cumulativeResponse.status}/${energySummaryResponse.status}`);
     }
 
     const statusPayload = await statusResponse.json();
     const samplesPayload = await samplesResponse.json();
     const cumulativePayload = await cumulativeResponse.json();
+    const energySummary = await energySummaryResponse.json();
     const items = Array.isArray(samplesPayload.items) ? samplesPayload.items : [];
     const cumulativeSeries = cumulativePayload && cumulativePayload.items ? cumulativePayload.items : { solar: [], grid: [], ev: [] };
 
@@ -1987,12 +1892,14 @@ async function refresh() {
       cachedAt: new Date().toISOString(),
       statusPayload,
       items,
-      cumulativeSeries
+      cumulativeSeries,
+      energySummary
     });
     renderDashboardState(
       statusPayload,
       items,
       cumulativeSeries,
+      energySummary,
       windowState,
       items.length
         ? `Updated ${new Date().toLocaleTimeString("en-AU", { timeZone: appTimezone })}`

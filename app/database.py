@@ -66,6 +66,23 @@ class Database:
                 ON cumulative_samples (source, observed_at)
                 """
             )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS energy_buckets (
+                    source TEXT NOT NULL,
+                    granularity TEXT NOT NULL,
+                    bucket_key TEXT NOT NULL,
+                    energy_kwh REAL NOT NULL,
+                    PRIMARY KEY (source, granularity, bucket_key)
+                )
+                """
+            )
+            connection.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_energy_buckets_granularity_bucket
+                ON energy_buckets (granularity, bucket_key)
+                """
+            )
 
     def insert_sample(
         self,
@@ -98,6 +115,13 @@ class Database:
                 ),
             )
             self._refresh_cumulative_cache(
+                connection,
+                source=source,
+                observed_at_iso=observed_at_iso,
+                grid_usage_watts=grid_usage_watts,
+                solar_generation_watts=solar_generation_watts,
+            )
+            self._refresh_energy_bucket_cache(
                 connection,
                 source=source,
                 observed_at_iso=observed_at_iso,
@@ -239,6 +263,30 @@ class Database:
             )
         return grouped
 
+    def get_energy_summary(self) -> dict[str, Any]:
+        with self._lock, self._connect() as connection:
+            for source in ("local_site", "ble", "byd_ev"):
+                self._ensure_energy_bucket_cache(connection, source)
+
+            hourly_keys = self._recent_hour_bucket_keys(24)
+            daily_keys = self._recent_day_bucket_keys(7)
+            weekly_keys = self._recent_week_bucket_keys(30)
+
+            generation = {
+                "hourly": self._get_bucket_map(connection, "hour", hourly_keys),
+                "daily": self._get_bucket_map(connection, "day", daily_keys),
+                "weekly": self._get_bucket_map(connection, "week", weekly_keys),
+            }
+
+            monthly_key = self._month_key(datetime.now(timezone.utc))
+            totals = {
+                "daily": self._get_totals_for_key(connection, "day", self._day_key(datetime.now(timezone.utc))),
+                "weekly": self._get_totals_for_key(connection, "week", self._week_key(datetime.now(timezone.utc))),
+                "monthly": self._get_totals_for_key(connection, "month", monthly_key),
+            }
+
+        return {"generation": generation, "totals": totals}
+
     def _ensure_cumulative_cache(self, connection: sqlite3.Connection, source: str) -> None:
         has_samples = connection.execute(
             """
@@ -266,6 +314,33 @@ class Database:
 
         self._rebuild_cumulative_cache(connection, source)
 
+    def _ensure_energy_bucket_cache(self, connection: sqlite3.Connection, source: str) -> None:
+        has_samples = connection.execute(
+            """
+            SELECT 1
+            FROM samples
+            WHERE source = ?
+            LIMIT 1
+            """,
+            (source,),
+        ).fetchone()
+        if not has_samples:
+            return
+
+        has_cache = connection.execute(
+            """
+            SELECT 1
+            FROM energy_buckets
+            WHERE source = ?
+            LIMIT 1
+            """,
+            (source,),
+        ).fetchone()
+        if has_cache:
+            return
+
+        self._rebuild_energy_bucket_cache(connection, source)
+
     def _refresh_cumulative_cache(
         self,
         connection: sqlite3.Connection,
@@ -289,6 +364,30 @@ class Database:
 
         if source == "byd_ev":
             self._rebuild_cumulative_cache(connection, source)
+
+    def _refresh_energy_bucket_cache(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        source: str,
+        observed_at_iso: str,
+        grid_usage_watts: Optional[float],
+        solar_generation_watts: Optional[float],
+    ) -> None:
+        if source == "local_site":
+            if solar_generation_watts is None:
+                return
+            self._append_or_rebuild_energy_buckets(connection, source, observed_at_iso, "solar_generation_watts")
+            return
+
+        if source == "ble":
+            if grid_usage_watts is None:
+                return
+            self._append_or_rebuild_energy_buckets(connection, source, observed_at_iso, "grid_usage_watts")
+            return
+
+        if source == "byd_ev":
+            self._rebuild_energy_bucket_cache(connection, source)
 
     def _append_or_rebuild_cumulative_cache(
         self,
@@ -403,6 +502,105 @@ class Database:
                 [(source, point["observed_at"], point["day_key"], point["cumulative_kwh"]) for point in cumulative_points],
             )
 
+    def _append_or_rebuild_energy_buckets(
+        self,
+        connection: sqlite3.Connection,
+        source: str,
+        observed_at_iso: str,
+        value_column: str,
+    ) -> None:
+        latest_bucket = connection.execute(
+            """
+            SELECT bucket_key
+            FROM energy_buckets
+            WHERE source = ?
+            LIMIT 1
+            """,
+            (source,),
+        ).fetchone()
+        if latest_bucket is None:
+            self._rebuild_energy_bucket_cache(connection, source)
+            return
+
+        relevant_samples = connection.execute(
+            f"""
+            SELECT observed_at, {value_column} AS value
+            FROM samples
+            WHERE source = ?
+              AND {value_column} IS NOT NULL
+            ORDER BY observed_at DESC
+            LIMIT 2
+            """,
+            (source,),
+        ).fetchall()
+        if len(relevant_samples) < 2:
+            self._rebuild_energy_bucket_cache(connection, source)
+            return
+
+        current_sample = relevant_samples[0]
+        previous_sample = relevant_samples[1]
+        if current_sample["observed_at"] != observed_at_iso:
+            self._rebuild_energy_bucket_cache(connection, source)
+            return
+        if observed_at_iso <= previous_sample["observed_at"]:
+            self._rebuild_energy_bucket_cache(connection, source)
+            return
+
+        current_observed_at = self._parse_api_datetime(current_sample["observed_at"])
+        previous_observed_at = self._parse_api_datetime(previous_sample["observed_at"])
+        average_rate = (float(previous_sample["value"]) + float(current_sample["value"])) / 2.0
+        self._add_bucket_segments(connection, source, previous_observed_at, current_observed_at, average_rate)
+
+    def _rebuild_energy_bucket_cache(self, connection: sqlite3.Connection, source: str) -> None:
+        if source == "local_site":
+            rows = connection.execute(
+                """
+                SELECT observed_at, solar_generation_watts AS value
+                FROM samples
+                WHERE source = 'local_site'
+                  AND solar_generation_watts IS NOT NULL
+                ORDER BY observed_at ASC
+                """
+            ).fetchall()
+            bucket_totals = self._build_bucket_totals_from_rows(rows)
+        elif source == "ble":
+            rows = connection.execute(
+                """
+                SELECT observed_at, grid_usage_watts AS value
+                FROM samples
+                WHERE source = 'ble'
+                  AND grid_usage_watts IS NOT NULL
+                ORDER BY observed_at ASC
+                """
+            ).fetchall()
+            bucket_totals = self._build_bucket_totals_from_rows(rows)
+        elif source == "byd_ev":
+            rows = connection.execute(
+                """
+                SELECT observed_at, grid_usage_watts, raw_payload
+                FROM samples
+                WHERE source = 'byd_ev'
+                ORDER BY observed_at ASC
+                """
+            ).fetchall()
+            bucket_totals = self._build_byd_bucket_totals(rows)
+        else:
+            bucket_totals = {}
+
+        connection.execute("DELETE FROM energy_buckets WHERE source = ?", (source,))
+        if bucket_totals:
+            connection.executemany(
+                """
+                INSERT INTO energy_buckets (source, granularity, bucket_key, energy_kwh)
+                VALUES (?, ?, ?, ?)
+                """,
+                [
+                    (source, granularity, bucket_key, energy_kwh)
+                    for granularity, bucket_map in bucket_totals.items()
+                    for bucket_key, energy_kwh in bucket_map.items()
+                ],
+            )
+
     def _build_cumulative_points_from_rows(self, rows: list[sqlite3.Row]) -> list[dict[str, Any]]:
         points: list[dict[str, Any]] = []
         cumulative = 0.0
@@ -435,6 +633,20 @@ class Database:
             )
 
         return points
+
+    def _build_bucket_totals_from_rows(self, rows: list[sqlite3.Row | dict[str, Any]]) -> dict[str, dict[str, float]]:
+        bucket_totals: dict[str, dict[str, float]] = {"hour": {}, "day": {}, "week": {}, "month": {}}
+        for index in range(1, len(rows)):
+            previous_row = rows[index - 1]
+            current_row = rows[index]
+            previous_observed_at = self._parse_api_datetime(previous_row["observed_at"])
+            current_observed_at = self._parse_api_datetime(current_row["observed_at"])
+            average_rate = (float(previous_row["value"]) + float(current_row["value"])) / 2.0
+            for granularity, segments in self._build_bucket_segments(previous_observed_at, current_observed_at, average_rate).items():
+                target = bucket_totals[granularity]
+                for bucket_key, energy_kwh in segments.items():
+                    target[bucket_key] = target.get(bucket_key, 0.0) + energy_kwh
+        return bucket_totals
 
     def _build_byd_cumulative_points(self, rows: list[sqlite3.Row]) -> list[dict[str, Any]]:
         byd_rows: list[dict[str, Any]] = []
@@ -475,6 +687,78 @@ class Database:
 
         return self._build_cumulative_points_from_rows(series_rows)
 
+    def _build_byd_bucket_totals(self, rows: list[sqlite3.Row]) -> dict[str, dict[str, float]]:
+        byd_rows: list[dict[str, Any]] = []
+        for row in rows:
+            payload = json.loads(row["raw_payload"]) if row["raw_payload"] else {}
+            byd_rows.append(
+                {
+                    "observed_at": row["observed_at"],
+                    "observed_dt": self._parse_api_datetime(row["observed_at"]),
+                    "grid_usage_watts": row["grid_usage_watts"],
+                    "raw_payload": payload if isinstance(payload, dict) else {},
+                }
+            )
+
+        movement_window_seconds = 2 * 60
+        moving_epochs = [
+            item["observed_dt"].timestamp()
+            for item in byd_rows
+            if (self._get_byd_vehicle_speed_kph(item) or 0) > 0
+        ]
+
+        series_rows: list[dict[str, Any]] = []
+        for item in byd_rows:
+            charging_rate = self._get_byd_charging_rate(item)
+            power_w = self._get_byd_power_watts(item)
+            suppressed = any(abs(item["observed_dt"].timestamp() - epoch) <= movement_window_seconds for epoch in moving_epochs)
+            if suppressed:
+                charging_rate = 0.0
+                power_w = 0.0
+            if charging_rate is None and power_w is None:
+                continue
+            series_rows.append(
+                {
+                    "observed_at": item["observed_at"],
+                    "value": charging_rate if charging_rate is not None else 0.0,
+                }
+            )
+
+        return self._build_bucket_totals_from_rows(series_rows)
+
+    def _add_bucket_segments(
+        self,
+        connection: sqlite3.Connection,
+        source: str,
+        start: datetime,
+        end: datetime,
+        average_rate_w_per_min: float,
+    ) -> None:
+        for granularity, bucket_map in self._build_bucket_segments(start, end, average_rate_w_per_min).items():
+            for bucket_key, energy_kwh in bucket_map.items():
+                connection.execute(
+                    """
+                    INSERT INTO energy_buckets (source, granularity, bucket_key, energy_kwh)
+                    VALUES (?, ?, ?, ?)
+                    ON CONFLICT(source, granularity, bucket_key)
+                    DO UPDATE SET energy_kwh = energy_buckets.energy_kwh + excluded.energy_kwh
+                    """,
+                    (source, granularity, bucket_key, energy_kwh),
+                )
+
+    def _build_bucket_segments(
+        self,
+        start: datetime,
+        end: datetime,
+        average_rate_w_per_min: float,
+    ) -> dict[str, dict[str, float]]:
+        return {
+            "hour": self._split_energy_across_buckets(start, end, average_rate_w_per_min, "hour"),
+            "day": self._split_energy_across_buckets(start, end, average_rate_w_per_min, "day"),
+            "week": self._split_energy_across_buckets(start, end, average_rate_w_per_min, "week"),
+            "month": self._split_energy_across_buckets(start, end, average_rate_w_per_min, "month"),
+        }
+
     def _split_energy_across_days(
         self,
         start: datetime,
@@ -503,8 +787,133 @@ class Database:
 
         return segments
 
+    def _split_energy_across_buckets(
+        self,
+        start: datetime,
+        end: datetime,
+        average_rate_w_per_min: float,
+        granularity: str,
+    ) -> dict[str, float]:
+        if end <= start:
+            return {}
+
+        cursor = start.astimezone(self._timezone)
+        end_local = end.astimezone(self._timezone)
+        segments: dict[str, float] = {}
+
+        while cursor < end_local:
+            bucket_key = self._bucket_key_for_local_datetime(cursor, granularity)
+            next_boundary = self._next_bucket_boundary(cursor, granularity)
+            segment_end = next_boundary if next_boundary < end_local else end_local
+            delta_minutes = (segment_end - cursor).total_seconds() / 60.0
+            if delta_minutes > 0:
+                segments[bucket_key] = segments.get(bucket_key, 0.0) + (float(average_rate_w_per_min) * delta_minutes) / 1000.0
+            cursor = segment_end
+
+        return segments
+
     def _day_key(self, observed_at: datetime) -> str:
         return observed_at.astimezone(self._timezone).strftime("%Y-%m-%d")
+
+    def _hour_key(self, observed_at: datetime) -> str:
+        return observed_at.astimezone(self._timezone).strftime("%Y-%m-%d %H:00")
+
+    def _week_key(self, observed_at: datetime) -> str:
+        local = observed_at.astimezone(self._timezone)
+        week_start = (local - timedelta(days=local.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
+        return week_start.strftime("%Y-%m-%d")
+
+    def _month_key(self, observed_at: datetime) -> str:
+        return observed_at.astimezone(self._timezone).strftime("%Y-%m")
+
+    def _bucket_key_for_local_datetime(self, observed_at: datetime, granularity: str) -> str:
+        if granularity == "hour":
+            return observed_at.strftime("%Y-%m-%d %H:00")
+        if granularity == "day":
+            return observed_at.strftime("%Y-%m-%d")
+        if granularity == "week":
+            week_start = (observed_at - timedelta(days=observed_at.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
+            return week_start.strftime("%Y-%m-%d")
+        if granularity == "month":
+            return observed_at.strftime("%Y-%m")
+        raise ValueError(f"Unsupported granularity: {granularity}")
+
+    def _next_bucket_boundary(self, observed_at: datetime, granularity: str) -> datetime:
+        if granularity == "hour":
+            return observed_at.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
+        if granularity == "day":
+            return observed_at.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
+        if granularity == "week":
+            week_start = (observed_at - timedelta(days=observed_at.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
+            return week_start + timedelta(days=7)
+        if granularity == "month":
+            month_anchor = observed_at.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+            if month_anchor.month == 12:
+                return month_anchor.replace(year=month_anchor.year + 1, month=1)
+            return month_anchor.replace(month=month_anchor.month + 1)
+        raise ValueError(f"Unsupported granularity: {granularity}")
+
+    def _recent_hour_bucket_keys(self, count: int) -> list[str]:
+        now_local = datetime.now(self._timezone).replace(minute=0, second=0, microsecond=0)
+        return [(now_local - timedelta(hours=offset)).strftime("%Y-%m-%d %H:00") for offset in range(count - 1, -1, -1)]
+
+    def _recent_day_bucket_keys(self, count: int) -> list[str]:
+        now_local = datetime.now(self._timezone).replace(hour=0, minute=0, second=0, microsecond=0)
+        return [(now_local - timedelta(days=offset)).strftime("%Y-%m-%d") for offset in range(count - 1, -1, -1)]
+
+    def _recent_week_bucket_keys(self, trailing_days: int) -> list[str]:
+        now_local = datetime.now(self._timezone).replace(hour=0, minute=0, second=0, microsecond=0)
+        start_local = now_local - timedelta(days=trailing_days - 1)
+        first_week_start = (start_local - timedelta(days=start_local.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
+        current_week_start = (now_local - timedelta(days=now_local.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
+        keys: list[str] = []
+        cursor = first_week_start
+        while cursor <= current_week_start:
+            keys.append(cursor.strftime("%Y-%m-%d"))
+            cursor += timedelta(days=7)
+        return keys
+
+    def _get_bucket_map(self, connection: sqlite3.Connection, granularity: str, bucket_keys: list[str]) -> dict[str, dict[str, float]]:
+        rows = connection.execute(
+            f"""
+            SELECT source, bucket_key, energy_kwh
+            FROM energy_buckets
+            WHERE granularity = ?
+              AND bucket_key IN ({",".join("?" for _ in bucket_keys)})
+            """,
+            (granularity, *bucket_keys),
+        ).fetchall() if bucket_keys else []
+
+        source_map = {"local_site": "solar", "ble": "grid", "byd_ev": "ev"}
+        result = {
+            "solar": {bucket_key: 0.0 for bucket_key in bucket_keys},
+            "grid": {bucket_key: 0.0 for bucket_key in bucket_keys},
+            "ev": {bucket_key: 0.0 for bucket_key in bucket_keys},
+        }
+        for row in rows:
+            target = source_map.get(row["source"])
+            if target:
+                result[target][row["bucket_key"]] = float(row["energy_kwh"] or 0.0)
+        return result
+
+    def _get_totals_for_key(self, connection: sqlite3.Connection, granularity: str, bucket_key: str) -> dict[str, float]:
+        rows = connection.execute(
+            """
+            SELECT source, energy_kwh
+            FROM energy_buckets
+            WHERE granularity = ?
+              AND bucket_key = ?
+            """,
+            (granularity, bucket_key),
+        ).fetchall()
+        totals = {"solar": 0.0, "grid": 0.0, "ev": 0.0}
+        source_map = {"local_site": "solar", "ble": "grid", "byd_ev": "ev"}
+        for row in rows:
+            target = source_map.get(row["source"])
+            if target:
+                totals[target] = float(row["energy_kwh"] or 0.0)
+        totals["net"] = totals["solar"] - totals["grid"]
+        return totals
 
     @staticmethod
     def _parse_api_datetime(value: str) -> datetime:
