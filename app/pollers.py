@@ -1106,6 +1106,22 @@ class TuyaSolarChargingAutomation:
         async with httpx.AsyncClient(timeout=self.settings.tuya_timeout_seconds) as client:
             while not self._stopped.is_set():
                 try:
+                    if not self.settings.tuya_solar_automation_enabled:
+                        self._ble_guard_hold_until = None
+                        await self.statuses.update(
+                            "tuya_automation",
+                            state="idle",
+                            mark_success=True,
+                            details={
+                                "mode": "disabled",
+                                "reason": "Automation toggle is off",
+                                "target_enabled": None,
+                                "target_current": None,
+                            },
+                        )
+                        await asyncio.sleep(self.settings.tuya_solar_automation_poll_seconds)
+                        continue
+
                     if not self.settings.tuya_access_id or not self.settings.tuya_access_secret or not self.settings.tuya_device_id:
                         raise RuntimeError("Tuya solar automation requires TUYA_ACCESS_ID, TUYA_ACCESS_SECRET, and TUYA_DEVICE_ID")
 
@@ -1573,7 +1589,7 @@ class PollingCoordinator:
             self.pollers.append(byd_poller)
             self.tasks.append(asyncio.create_task(byd_poller.run(), name="byd-ev-poller"))
 
-        if self.settings.tuya_solar_automation_enabled:
+        if self.settings.tuya_access_id and self.settings.tuya_access_secret and self.settings.tuya_device_id:
             tuya_automation = TuyaSolarChargingAutomation(self.settings, self.database, self.statuses)
             self.pollers.append(tuya_automation)
             self.tasks.append(asyncio.create_task(tuya_automation.run(), name="tuya-solar-automation"))
