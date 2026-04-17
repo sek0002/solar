@@ -400,6 +400,36 @@ function getInfernoSolarColorFromWatts(watts, maxKw = 5) {
   return `rgb(${channels[0]}, ${channels[1]}, ${channels[2]})`;
 }
 
+function parseRgbChannels(color) {
+  const match = String(color || "").match(/rgb\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)\s*\)/i);
+  if (!match) {
+    return null;
+  }
+  return [Number(match[1]), Number(match[2]), Number(match[3])];
+}
+
+function getGaugeTextColors(fillColor) {
+  const channels = parseRgbChannels(fillColor);
+  if (!channels) {
+    return {
+      text: "#edf4ff",
+      subtext: "rgba(237, 244, 255, 0.78)"
+    };
+  }
+  const [red, green, blue] = channels;
+  const luminance = (0.2126 * red + 0.7152 * green + 0.0722 * blue) / 255;
+  if (luminance > 0.62) {
+    return {
+      text: "#18212f",
+      subtext: "rgba(24, 33, 47, 0.74)"
+    };
+  }
+  return {
+    text: "#f8fbff",
+    subtext: "rgba(248, 251, 255, 0.8)"
+  };
+}
+
 function getLatestRateBySource(samples, source, valueKey) {
   const latestItem = (samples || [])
     .filter((item) => item.source === source && item[valueKey] !== null && item[valueKey] !== undefined)
@@ -410,11 +440,15 @@ function getLatestRateBySource(samples, source, valueKey) {
 function renderTopbarGauge(samples) {
   const solarRate = getLatestRateBySource(samples, "local_site", "solar_generation_watts");
   const bleRate = getLatestRateBySource(samples, "ble", "grid_usage_watts");
-  const bleProgress = clamp((bleRate === null ? 0 : ratePerMinuteToKwPerHour(bleRate) / 10), 0, 1);
+  const bleProgress = clamp((bleRate === null ? 0 : ratePerMinuteToKwPerHour(bleRate) / 5), 0, 1);
+  const fillColor = getInfernoSolarColor(solarRate, 5);
+  const textColors = getGaugeTextColors(fillColor);
 
   if (topbarGauge) {
     topbarGauge.style.setProperty("--ring-progress", `${bleProgress}turn`);
-    topbarGauge.style.setProperty("--core-fill", getInfernoSolarColor(solarRate, 5));
+    topbarGauge.style.setProperty("--core-fill", fillColor);
+    topbarGauge.style.setProperty("--core-text", textColors.text);
+    topbarGauge.style.setProperty("--core-subtext", textColors.subtext);
     topbarGauge.style.setProperty("--inner-ring-stroke", "rgba(240, 244, 255, 0.1)");
   }
   if (topbarSolarValue) {
@@ -431,10 +465,14 @@ function renderBydTopbarGauge(samples, pollers) {
   const glRate = glWatts;
   const socPercent = getBydSocPercent(samples, pollers);
   const socProgress = clamp((socPercent === null ? 0 : socPercent / 100), 0, 1);
+  const fillColor = getInfernoSolarColorFromWatts(glRate, 3);
+  const textColors = getGaugeTextColors(fillColor);
 
   if (topbarBydGauge) {
     topbarBydGauge.style.setProperty("--ring-progress", `${socProgress}turn`);
-    topbarBydGauge.style.setProperty("--core-fill", getInfernoSolarColorFromWatts(glRate, 3));
+    topbarBydGauge.style.setProperty("--core-fill", fillColor);
+    topbarBydGauge.style.setProperty("--core-text", textColors.text);
+    topbarBydGauge.style.setProperty("--core-subtext", textColors.subtext);
     topbarBydGauge.style.setProperty("--inner-ring-stroke", "rgba(255, 214, 181, 0.09)");
   }
   if (topbarBydValue) {

@@ -215,6 +215,8 @@ body {
 .topbar-gauge {
   --ring-progress: 0turn;
   --core-fill: #0d1830;
+  --core-text: #edf4ff;
+  --core-subtext: rgba(237, 244, 255, 0.78);
   --inner-ring-stroke: rgba(240, 244, 255, 0.1);
   position: relative;
   width: 172px;
@@ -292,7 +294,7 @@ body {
 }
 
 .topbar-gauge-label {
-  color: var(--muted);
+  color: var(--core-subtext);
   font-size: 0.74rem;
   text-transform: uppercase;
   letter-spacing: 0.12em;
@@ -301,12 +303,13 @@ body {
 }
 
 .topbar-gauge-value {
+  color: var(--core-text);
   font-size: 1.28rem;
   line-height: 0.98;
 }
 
 .topbar-gauge-subvalue {
-  color: var(--muted);
+  color: var(--core-subtext);
   font-size: 0.64rem;
   line-height: 1.02;
   margin-top: -1px;
