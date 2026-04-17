@@ -19,6 +19,7 @@ const automationToggle = document.querySelector("#automation-toggle");
 const automationToggleWrap = document.querySelector("#automation-toggle-wrap");
 const automationToggleStatus = document.querySelector("#automation-toggle-status");
 const chargerCurrentWrap = document.querySelector("#charger-current-wrap");
+const chargerCurrentStatus = document.querySelector("#charger-current-status");
 const chargerCurrentOptions = Array.from(document.querySelectorAll(".charger-current-option"));
 const topbarGauge = document.querySelector("#topbar-gauge");
 const topbarSolarValue = document.querySelector("#topbar-solar-value");
@@ -499,27 +500,27 @@ function getChargerStatusLabel(chargerState, isEnabled) {
     return chargerPendingMessage;
   }
   if (!chargerState) {
-    return "Charger n/a";
+    return "n/a";
   }
   if (chargerState.workState === "charger_charging") {
-    return "charging";
+    return "On";
   }
   if (chargerState.workState === "charger_wait") {
-    return "charger wait";
+    return "Ready";
   }
   if (chargerState.workState === "charge_end") {
-    return "charge end";
+    return "Off";
   }
   if (chargerState.workState === "charger_free") {
-    return "charger free";
+    return "Idle";
   }
   if (isEnabled === true) {
-    return "charging";
+    return "On";
   }
   if (isEnabled === false) {
-    return "off";
+    return "Off";
   }
-  return "Charger n/a";
+  return "n/a";
 }
 
 function getAutomationEnabled(statusPayload) {
@@ -577,6 +578,9 @@ function renderChargerToggle(samples, directStatus = null) {
     button.title = chargerState.current === null ? "Current unavailable" : `${current}A`;
     button.disabled = chargerCommandInFlight;
   });
+  if (chargerCurrentStatus) {
+    chargerCurrentStatus.textContent = chargerState && chargerState.current !== null ? `${chargerState.current}A set` : "Current n/a";
+  }
 }
 
 function getDayKey(dateLike) {

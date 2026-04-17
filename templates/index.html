@@ -116,14 +116,15 @@
                   </span>
                   <span id="automation-toggle-status" class="charger-toggle-status">Auto off</span>
                 </label>
-              </div>
-            </div>
-            <div id="charger-current-wrap" class="charger-current" {% if not tuya_control_enabled %}hidden{% endif %}>
-              <span class="charger-current-label">Current</span>
-              <div class="charger-current-options" role="group" aria-label="Charging current">
-                <button class="charger-current-option" type="button" data-current="6">6A</button>
-                <button class="charger-current-option" type="button" data-current="10">10A</button>
-                <button class="charger-current-option" type="button" data-current="13">13A</button>
+                <div id="charger-current-wrap" class="charger-toggle-segment charger-current-segment">
+                  <span class="charger-toggle-mini-label">Current</span>
+                  <div class="charger-current-options" role="group" aria-label="Charging current">
+                    <button class="charger-current-option" type="button" data-current="6">6A</button>
+                    <button class="charger-current-option" type="button" data-current="10">10A</button>
+                    <button class="charger-current-option" type="button" data-current="13">13A</button>
+                  </div>
+                  <span id="charger-current-status" class="charger-toggle-status">Current n/a</span>
+                </div>
               </div>
             </div>
           </div>

@@ -345,6 +345,8 @@ body {
   display: inline-flex;
   align-items: stretch;
   gap: 6px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .charger-toggle-segment {
@@ -352,6 +354,10 @@ body {
   gap: 3px;
   justify-items: center;
   min-width: 56px;
+}
+
+.charger-current-segment {
+  min-width: 126px;
 }
 
 .charger-toggle-mini-label {
@@ -456,20 +462,6 @@ body {
   line-height: 1;
 }
 
-.charger-current {
-  display: grid;
-  gap: 6px;
-  justify-items: end;
-  margin-top: 4px;
-}
-
-.charger-current-label {
-  font-size: 0.72rem;
-  color: var(--muted);
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-}
-
 .charger-current-options {
   display: inline-flex;
   align-items: center;
@@ -479,6 +471,10 @@ body {
   border: 1px solid var(--line);
   background: var(--panel);
   box-shadow: var(--shadow);
+}
+
+.charger-current-segment .charger-current-options {
+  min-height: 24px;
 }
 
 .charger-current-option {
