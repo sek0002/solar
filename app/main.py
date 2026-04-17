@@ -684,6 +684,23 @@ async def api_tuya_charger(payload: dict[str, object]) -> dict[str, object]:
     return {"status": "ok", "enabled": enabled, "result": result.get("result")}
 
 
+@app.post("/api/tuya/charger/current")
+async def api_tuya_charger_current(payload: dict[str, object]) -> dict[str, object]:
+    if not settings.tuya_access_id or not settings.tuya_access_secret or not settings.tuya_device_id:
+        raise HTTPException(status_code=503, detail="Tuya charger control is not configured")
+
+    current = payload.get("current")
+    if not isinstance(current, int) or current not in {6, 10, 13}:
+        raise HTTPException(status_code=400, detail="Expected integer 'current' field with value 6, 10, or 13")
+
+    async with httpx.AsyncClient(timeout=settings.tuya_timeout_seconds) as client:
+        result = await tuya_client.send_device_commands(
+            client,
+            [{"code": "charge_cur_set", "value": current}],
+        )
+    return {"status": "ok", "current": current, "result": result.get("result")}
+
+
 def _check_ingest_token(token: Optional[str]) -> None:
     configured = settings.ingest_token.strip()
     if not configured:

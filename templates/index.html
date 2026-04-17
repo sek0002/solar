@@ -72,13 +72,6 @@
             </div>
             <div class="topbar-gauge-inner-ticks"></div>
           </div>
-          <label id="charger-toggle-wrap" class="charger-toggle charger-toggle-topbar" {% if not tuya_control_enabled %}hidden{% endif %}>
-            <span class="charger-toggle-icon" aria-hidden="true">&#9889;</span>
-            <span class="charger-toggle-control">
-              <input id="charger-toggle" type="checkbox" aria-label="Start or stop charger">
-              <span class="charger-toggle-track"></span>
-            </span>
-          </label>
         </div>
         <button id="reset-range" class="theme-toggle" type="button" aria-label="Reset start time">
           Reset
@@ -100,6 +93,22 @@
               <div id="ev-battery-fill" class="ev-battery-fill"></div>
             </div>
             <span id="ev-battery-label" class="last-refresh">EV SoC n/a</span>
+            <label id="charger-toggle-wrap" class="charger-toggle charger-toggle-inline" {% if not tuya_control_enabled %}hidden{% endif %}>
+              <span class="charger-toggle-icon" aria-hidden="true">&#9889;</span>
+              <span class="charger-toggle-control">
+                <input id="charger-toggle" type="checkbox" aria-label="Start or stop charger">
+                <span class="charger-toggle-track"></span>
+              </span>
+              <span id="charger-toggle-status" class="charger-toggle-status">Charger off</span>
+            </label>
+            <div id="charger-current-wrap" class="charger-current" {% if not tuya_control_enabled %}hidden{% endif %}>
+              <span class="charger-current-label">Current</span>
+              <div class="charger-current-options" role="group" aria-label="Charging current">
+                <button class="charger-current-option" type="button" data-current="6">6A</button>
+                <button class="charger-current-option" type="button" data-current="10">10A</button>
+                <button class="charger-current-option" type="button" data-current="13">13A</button>
+              </div>
+            </div>
           </div>
         </div>
       </div>

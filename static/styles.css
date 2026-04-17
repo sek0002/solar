@@ -380,11 +380,66 @@ body {
   opacity: 0.7;
 }
 
-.charger-toggle-topbar {
-  gap: 8px;
+.charger-toggle-inline {
+  justify-self: end;
+  margin-top: 4px;
   padding: 6px 8px;
-  min-height: 0;
-  align-self: center;
+  gap: 8px;
+}
+
+.charger-toggle-status {
+  font-size: 0.75rem;
+  color: var(--muted);
+  min-width: 72px;
+  text-align: right;
+}
+
+.charger-current {
+  display: grid;
+  gap: 6px;
+  justify-items: end;
+  margin-top: 4px;
+}
+
+.charger-current-label {
+  font-size: 0.72rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.charger-current-options {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  box-shadow: var(--shadow);
+}
+
+.charger-current-option {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  padding: 6px 10px;
+  border-radius: 999px;
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.18s ease, color 0.18s ease, opacity 0.18s ease;
+}
+
+.charger-current-option.is-active {
+  background: color-mix(in srgb, var(--accent-2) 24%, transparent);
+  color: var(--text);
+}
+
+.charger-current-option:disabled {
+  cursor: wait;
+  opacity: 0.6;
 }
 
 .ev-battery-meter {

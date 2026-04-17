@@ -14,6 +14,9 @@ const evBatteryFill = document.querySelector("#ev-battery-fill");
 const evBatteryLabel = document.querySelector("#ev-battery-label");
 const chargerToggle = document.querySelector("#charger-toggle");
 const chargerToggleWrap = document.querySelector("#charger-toggle-wrap");
+const chargerToggleStatus = document.querySelector("#charger-toggle-status");
+const chargerCurrentWrap = document.querySelector("#charger-current-wrap");
+const chargerCurrentOptions = Array.from(document.querySelectorAll(".charger-current-option"));
 const topbarGauge = document.querySelector("#topbar-gauge");
 const topbarSolarValue = document.querySelector("#topbar-solar-value");
 const topbarBleValue = document.querySelector("#topbar-ble-value");
@@ -422,7 +425,13 @@ function getTuyaSwitchState(samples) {
     ? tuyaSample.raw_payload.status_codes
     : [];
   const switchItem = statusCodes.find((item) => item && item.code === "switch");
-  return switchItem && typeof switchItem.value === "boolean" ? switchItem.value : null;
+  const workStateItem = statusCodes.find((item) => item && item.code === "work_state");
+  const currentItem = statusCodes.find((item) => item && item.code === "charge_cur_set");
+  return {
+    enabled: switchItem && typeof switchItem.value === "boolean" ? switchItem.value : null,
+    workState: workStateItem && typeof workStateItem.value === "string" ? workStateItem.value : null,
+    current: currentItem && Number.isFinite(Number(currentItem.value)) ? Number(currentItem.value) : null
+  };
 }
 
 function renderChargerToggle(samples) {
@@ -431,11 +440,32 @@ function renderChargerToggle(samples) {
   }
   if (!tuyaControlEnabled) {
     chargerToggleWrap.hidden = true;
+    if (chargerCurrentWrap) {
+      chargerCurrentWrap.hidden = true;
+    }
     return;
   }
   chargerToggleWrap.hidden = false;
-  const switchState = getTuyaSwitchState(samples);
-  chargerToggle.checked = switchState === true;
+  if (chargerCurrentWrap) {
+    chargerCurrentWrap.hidden = false;
+  }
+  const chargerState = getTuyaSwitchState(samples);
+  chargerToggle.checked = chargerState.enabled === true;
+  if (chargerToggleStatus) {
+    chargerToggleStatus.textContent = chargerState.enabled === null
+      ? "Charger n/a"
+      : chargerState.enabled
+        ? (chargerState.workState || "Charging on").replace(/_/g, " ")
+        : (chargerState.workState || "Charger off").replace(/_/g, " ");
+  }
+  chargerToggle.title = chargerToggleStatus ? chargerToggleStatus.textContent : "";
+  chargerCurrentOptions.forEach((button) => {
+    const current = Number(button.dataset.current);
+    const isActive = chargerState.current === current;
+    button.classList.toggle("is-active", isActive);
+    button.setAttribute("aria-pressed", isActive ? "true" : "false");
+    button.title = chargerState.current === null ? "Current unavailable" : `${current}A`;
+  });
 }
 
 function getDayKey(dateLike) {
@@ -2091,6 +2121,35 @@ if (chargerToggle) {
     }
   });
 }
+
+chargerCurrentOptions.forEach((button) => {
+  button.addEventListener("click", async () => {
+    const current = Number(button.dataset.current);
+    if (!Number.isFinite(current)) {
+      return;
+    }
+    chargerCurrentOptions.forEach((option) => {
+      option.disabled = true;
+    });
+    try {
+      const response = await fetch("/api/tuya/charger/current", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ current })
+      });
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+      scheduleRefresh(250);
+    } catch (error) {
+      console.error("Unable to update charger current", error);
+    } finally {
+      chargerCurrentOptions.forEach((option) => {
+        option.disabled = false;
+      });
+    }
+  });
+});
 
 window.addEventListener("resize", resizeCharts);
 if ("serviceWorker" in navigator) {
