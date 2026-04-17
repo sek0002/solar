@@ -330,6 +330,38 @@ body {
   box-shadow: var(--shadow);
 }
 
+.charger-toggle-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+}
+
+.charger-toggle-pair {
+  display: inline-flex;
+  align-items: stretch;
+  gap: 6px;
+}
+
+.charger-toggle-segment {
+  display: grid;
+  gap: 3px;
+  justify-items: center;
+  min-width: 56px;
+}
+
+.charger-toggle-mini-label {
+  font-size: 0.64rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  line-height: 1;
+}
+
 .charger-toggle-label {
   font-size: 0.84rem;
   color: var(--muted);
@@ -406,20 +438,22 @@ body {
 .charger-toggle-inline {
   justify-self: end;
   margin-top: 4px;
-  padding: 6px 8px;
-  gap: 8px;
 }
 
-.automation-toggle .automation-toggle-icon {
+.automation-toggle .charger-toggle-track {
   background: color-mix(in srgb, var(--accent) 22%, transparent);
-  color: color-mix(in srgb, var(--accent) 55%, var(--text));
+}
+
+.automation-toggle input:checked + .charger-toggle-track {
+  background: color-mix(in srgb, var(--accent) 78%, white 6%);
 }
 
 .charger-toggle-status {
-  font-size: 0.75rem;
+  font-size: 0.66rem;
   color: var(--muted);
-  min-width: 72px;
-  text-align: right;
+  min-width: 0;
+  text-align: center;
+  line-height: 1;
 }
 
 .charger-current {

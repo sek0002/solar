@@ -97,22 +97,27 @@
               <div id="ev-battery-fill" class="ev-battery-fill"></div>
             </div>
             <span id="ev-battery-label" class="last-refresh">EV SoC n/a</span>
-            <label id="charger-toggle-wrap" class="charger-toggle charger-toggle-inline" {% if not tuya_control_enabled %}hidden{% endif %}>
+            <div id="charger-toggle-wrap" class="charger-toggle-group charger-toggle-inline" {% if not tuya_control_enabled %}hidden{% endif %}>
               <span class="charger-toggle-icon" aria-hidden="true">&#9889;</span>
-              <span class="charger-toggle-control">
-                <input id="charger-toggle" type="checkbox" aria-label="Start or stop charger">
-                <span class="charger-toggle-track"></span>
-              </span>
-              <span id="charger-toggle-status" class="charger-toggle-status">Charger off</span>
-            </label>
-            <label id="automation-toggle-wrap" class="charger-toggle charger-toggle-inline automation-toggle" {% if not tuya_control_enabled %}hidden{% endif %}>
-              <span class="charger-toggle-icon automation-toggle-icon" aria-hidden="true">A</span>
-              <span class="charger-toggle-control">
-                <input id="automation-toggle" type="checkbox" aria-label="Enable or disable charging automation">
-                <span class="charger-toggle-track"></span>
-              </span>
-              <span id="automation-toggle-status" class="charger-toggle-status">Auto off</span>
-            </label>
+              <div class="charger-toggle-pair">
+                <label class="charger-toggle-segment">
+                  <span class="charger-toggle-mini-label">Charge</span>
+                  <span class="charger-toggle-control">
+                    <input id="charger-toggle" type="checkbox" aria-label="Start or stop charger">
+                    <span class="charger-toggle-track"></span>
+                  </span>
+                  <span id="charger-toggle-status" class="charger-toggle-status">Charger off</span>
+                </label>
+                <label id="automation-toggle-wrap" class="charger-toggle-segment automation-toggle">
+                  <span class="charger-toggle-mini-label">Auto</span>
+                  <span class="charger-toggle-control">
+                    <input id="automation-toggle" type="checkbox" aria-label="Enable or disable charging automation">
+                    <span class="charger-toggle-track"></span>
+                  </span>
+                  <span id="automation-toggle-status" class="charger-toggle-status">Auto off</span>
+                </label>
+              </div>
+            </div>
             <div id="charger-current-wrap" class="charger-current" {% if not tuya_control_enabled %}hidden{% endif %}>
               <span class="charger-current-label">Current</span>
               <div class="charger-current-options" role="group" aria-label="Charging current">
