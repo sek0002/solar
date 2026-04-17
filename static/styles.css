@@ -99,6 +99,29 @@ body {
   white-space: nowrap;
 }
 
+.collector-chip-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  border-radius: 999px;
+  font-size: 0.62rem;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--text);
+  background: color-mix(in srgb, var(--muted) 18%, transparent);
+}
+
+.collector-chip-automation {
+  padding-inline: 7px 9px;
+}
+
+.collector-chip-automation .collector-chip-icon {
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  color: color-mix(in srgb, var(--accent) 55%, var(--text));
+}
+
 .collector-chip-light {
   width: 8px;
   height: 8px;
@@ -385,6 +408,11 @@ body {
   margin-top: 4px;
   padding: 6px 8px;
   gap: 8px;
+}
+
+.automation-toggle .automation-toggle-icon {
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  color: color-mix(in srgb, var(--accent) 55%, var(--text));
 }
 
 .charger-toggle-status {

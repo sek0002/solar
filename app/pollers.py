@@ -10,7 +10,7 @@ import re
 import struct
 import sys
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Optional
 import uuid
@@ -29,6 +29,7 @@ PAIRING_CODE_CHAR = "59da0011-12f4-25a6-7d4f-55961dce4205"
 POWERPAL_FREQ_CHAR = "59da0013-12f4-25a6-7d4f-55961dce4205"
 NOTIFY_CHAR = "59da0001-12f4-25a6-7d4f-55961dce4205"
 BATTERY_CHAR = "00002a19-0000-1000-8000-00805f9b34fb"
+tuya_command_lock = asyncio.Lock()
 
 
 def watts_to_rate_per_minute(value: Optional[float]) -> Optional[float]:
@@ -1086,6 +1087,267 @@ class TuyaEvPoller:
         }
 
 
+class TuyaSolarChargingAutomation:
+    def __init__(self, settings: Settings, database: Database, statuses: StatusRegistry) -> None:
+        self.settings = settings
+        self.database = database
+        self.statuses = statuses
+        self._stopped = asyncio.Event()
+        self._client = TuyaCloudClient(settings)
+        self._timezone = pytz.timezone(settings.timezone_name)
+
+    async def run(self) -> None:
+        await self.statuses.update(
+            "tuya_automation",
+            state="starting",
+            details={"mode": "solar_surplus"},
+        )
+        async with httpx.AsyncClient(timeout=self.settings.tuya_timeout_seconds) as client:
+            while not self._stopped.is_set():
+                try:
+                    if not self.settings.tuya_access_id or not self.settings.tuya_access_secret or not self.settings.tuya_device_id:
+                        raise RuntimeError("Tuya solar automation requires TUYA_ACCESS_ID, TUYA_ACCESS_SECRET, and TUYA_DEVICE_ID")
+
+                    evaluation = self._evaluate_target()
+                    if evaluation["mode"] == "offpeak":
+                        await self.statuses.update(
+                            "tuya_automation",
+                            state="idle",
+                            mark_success=True,
+                            details=evaluation,
+                        )
+                    elif evaluation["mode"] == "waiting":
+                        await self.statuses.update(
+                            "tuya_automation",
+                            state="waiting",
+                            mark_success=True,
+                            details=evaluation,
+                        )
+                    else:
+                        action = await self._apply_target(client, evaluation)
+                        await self.statuses.update(
+                            "tuya_automation",
+                            state="connected",
+                            mark_success=True,
+                            details={**evaluation, **action},
+                        )
+                except Exception as exc:
+                    LOGGER.warning("Tuya solar automation error: %s", exc)
+                    await self.statuses.update(
+                        "tuya_automation",
+                        state="error",
+                        error=str(exc),
+                        details={"mode": "solar_surplus"},
+                    )
+                await asyncio.sleep(self.settings.tuya_solar_automation_poll_seconds)
+
+    async def stop(self) -> None:
+        self._stopped.set()
+
+    def _evaluate_target(self) -> dict[str, Any]:
+        now_local = datetime.now(timezone.utc).astimezone(self._timezone)
+        if 0 <= now_local.hour < 6:
+            return {
+                "mode": "offpeak",
+                "reason": "Automation paused during off-peak window",
+                "local_time": now_local.isoformat(),
+            }
+
+        window_minutes = max(1.0, float(self.settings.tuya_solar_automation_window_minutes))
+        since = datetime.now(timezone.utc) - timedelta(minutes=window_minutes)
+        local_site_samples = [
+            item for item in self.database.get_samples_range(
+                since=since,
+                until=datetime.now(timezone.utc),
+                limit=5000,
+            )
+            if item.get("source") == "local_site" and item.get("solar_generation_watts") is not None
+        ]
+        if len(local_site_samples) < 2:
+            return {
+                "mode": "waiting",
+                "reason": "Not enough local site solar samples yet",
+                "sample_count": len(local_site_samples),
+                "window_minutes": window_minutes,
+            }
+
+        first_observed_at = self._parse_observed_at(str(local_site_samples[0]["observed_at"]))
+        last_observed_at = self._parse_observed_at(str(local_site_samples[-1]["observed_at"]))
+        span_seconds = max(0.0, (last_observed_at - first_observed_at).total_seconds())
+        allowed_gap_seconds = max(30.0, self.settings.local_site_poll_seconds * 2.0)
+        minimum_span_seconds = max(60.0, window_minutes * 60.0 - allowed_gap_seconds)
+        if span_seconds < minimum_span_seconds:
+            return {
+                "mode": "waiting",
+                "reason": "Waiting for a full sustained solar window",
+                "sample_count": len(local_site_samples),
+                "window_minutes": window_minutes,
+                "window_span_seconds": round(span_seconds, 1),
+                "required_span_seconds": round(minimum_span_seconds, 1),
+            }
+
+        solar_values = [
+            float(item["solar_generation_watts"])
+            for item in local_site_samples
+            if item.get("solar_generation_watts") is not None
+        ]
+        if not solar_values:
+            return {
+                "mode": "waiting",
+                "reason": "No usable solar values in recent window",
+                "sample_count": len(local_site_samples),
+                "window_minutes": window_minutes,
+            }
+
+        min_solar = min(solar_values)
+        max_solar = max(solar_values)
+        average_solar = sum(solar_values) / len(solar_values)
+        target_current = None
+        target_enabled = None
+        reason = "No sustained threshold change"
+        if min_solar >= float(self.settings.tuya_solar_automation_13a_watts):
+            target_enabled = True
+            target_current = 13
+            reason = "Sustained solar surplus for 13A"
+        elif min_solar >= float(self.settings.tuya_solar_automation_10a_watts):
+            target_enabled = True
+            target_current = 10
+            reason = "Sustained solar surplus for 10A"
+        elif min_solar >= float(self.settings.tuya_solar_automation_6a_watts):
+            target_enabled = True
+            target_current = 6
+            reason = "Sustained solar surplus for 6A"
+        elif max_solar < float(self.settings.tuya_solar_automation_6a_watts):
+            target_enabled = False
+            reason = "Sustained solar below charging threshold"
+
+        mode = "target" if target_enabled is not None else "waiting"
+        return {
+            "mode": mode,
+            "reason": reason,
+            "window_minutes": window_minutes,
+            "sample_count": len(local_site_samples),
+            "window_span_seconds": round(span_seconds, 1),
+            "min_solar_watts": round(min_solar, 1),
+            "max_solar_watts": round(max_solar, 1),
+            "average_solar_watts": round(average_solar, 1),
+            "target_enabled": target_enabled,
+            "target_current": target_current,
+            "latest_observed_at": str(local_site_samples[-1]["observed_at"]),
+        }
+
+    async def _apply_target(self, client: httpx.AsyncClient, evaluation: dict[str, Any]) -> dict[str, Any]:
+        desired_enabled = evaluation.get("target_enabled")
+        desired_current = evaluation.get("target_current")
+        async with tuya_command_lock:
+            initial_status = self._status_map(await self._client.get_device_status(client))
+            is_on = self._is_on(initial_status)
+            current_value = self._read_current(initial_status)
+
+            if desired_enabled is False:
+                if is_on is True:
+                    final_status = await self._set_switch_state(client, enabled=False)
+                    return {
+                        "action": "switched_off",
+                        "device_status": final_status,
+                    }
+                return {
+                    "action": "unchanged_off",
+                    "device_status": initial_status,
+                }
+
+            if desired_enabled is not True or desired_current not in {6, 10, 13}:
+                return {
+                    "action": "no_change",
+                    "device_status": initial_status,
+                }
+
+            if is_on is True and current_value == desired_current:
+                return {
+                    "action": "unchanged_on",
+                    "device_status": initial_status,
+                }
+
+            if is_on is True:
+                await self._set_switch_state(client, enabled=False)
+                await asyncio.sleep(1.0)
+
+            if current_value != desired_current:
+                await self._client.send_device_commands(
+                    client,
+                    [{"code": "charge_cur_set", "value": desired_current}],
+                )
+                await asyncio.sleep(1.0)
+
+            final_status = await self._set_switch_state(client, enabled=True)
+            return {
+                "action": "set_current_and_on" if current_value != desired_current else "switched_on",
+                "device_status": final_status,
+            }
+
+    async def _set_switch_state(self, client: httpx.AsyncClient, *, enabled: bool) -> dict[str, Any]:
+        await self._client.send_device_commands(
+            client,
+            [{"code": "switch", "value": enabled}],
+        )
+        return await self._wait_for_state(client, desired_on=enabled, timeout_seconds=10.0)
+
+    async def _wait_for_state(
+        self,
+        client: httpx.AsyncClient,
+        *,
+        desired_on: bool,
+        timeout_seconds: float = 10.0,
+        poll_interval_seconds: float = 1.0,
+    ) -> dict[str, Any]:
+        deadline = asyncio.get_running_loop().time() + timeout_seconds
+        last_status: dict[str, Any] = {}
+        while True:
+            last_status = self._status_map(await self._client.get_device_status(client))
+            if self._is_on(last_status) is desired_on:
+                return last_status
+            if asyncio.get_running_loop().time() >= deadline:
+                raise RuntimeError(
+                    f"Timed out waiting for charger to reach {'ON' if desired_on else 'OFF'} state"
+                )
+            await asyncio.sleep(poll_interval_seconds)
+
+    @staticmethod
+    def _status_map(status_payload: list[dict[str, Any]]) -> dict[str, Any]:
+        return {
+            str(item.get("code")): item.get("value")
+            for item in status_payload
+            if isinstance(item, dict) and item.get("code") is not None
+        }
+
+    @staticmethod
+    def _is_on(status_map: dict[str, Any]) -> Optional[bool]:
+        work_state = str(status_map.get("work_state") or "")
+        if work_state in {"charger_charging", "charger_wait"}:
+            return True
+        if work_state in {"charge_end", "charger_free"}:
+            return False
+        switch_value = status_map.get("switch")
+        return switch_value if isinstance(switch_value, bool) else None
+
+    @staticmethod
+    def _read_current(status_map: dict[str, Any]) -> Optional[int]:
+        value = status_map.get("charge_cur_set")
+        try:
+            numeric = int(float(value))
+        except (TypeError, ValueError):
+            return None
+        return numeric if numeric in {6, 10, 13} else numeric
+
+    @staticmethod
+    def _parse_observed_at(value: str) -> datetime:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed
+
+
+
 class BydEvPoller:
     def __init__(self, settings: Settings, database: Database, statuses: StatusRegistry) -> None:
         self.settings = settings
@@ -1236,6 +1498,11 @@ class PollingCoordinator:
             byd_poller = BydEvPoller(self.settings, self.database, self.statuses)
             self.pollers.append(byd_poller)
             self.tasks.append(asyncio.create_task(byd_poller.run(), name="byd-ev-poller"))
+
+        if self.settings.tuya_solar_automation_enabled:
+            tuya_automation = TuyaSolarChargingAutomation(self.settings, self.database, self.statuses)
+            self.pollers.append(tuya_automation)
+            self.tasks.append(asyncio.create_task(tuya_automation.run(), name="tuya-solar-automation"))
 
     async def stop(self) -> None:
         for poller in self.pollers:

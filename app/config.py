@@ -106,6 +106,12 @@ class Settings:
     tuya_power_divisor: float = _env_float("TUYA_POWER_DIVISOR", 100.0)
     tuya_temperature_divisor: float = _env_float("TUYA_TEMPERATURE_DIVISOR", 10.0)
     tuya_session_energy_divisor: float = _env_float("TUYA_SESSION_ENERGY_DIVISOR", 100.0)
+    tuya_solar_automation_enabled: bool = _env_bool("TUYA_SOLAR_AUTOMATION_ENABLED", False)
+    tuya_solar_automation_poll_seconds: float = _env_float("TUYA_SOLAR_AUTOMATION_POLL_SECONDS", 30.0)
+    tuya_solar_automation_window_minutes: float = _env_float("TUYA_SOLAR_AUTOMATION_WINDOW_MINUTES", 5.0)
+    tuya_solar_automation_6a_watts: float = _env_float("TUYA_SOLAR_AUTOMATION_6A_WATTS", 2000.0)
+    tuya_solar_automation_10a_watts: float = _env_float("TUYA_SOLAR_AUTOMATION_10A_WATTS", 3000.0)
+    tuya_solar_automation_13a_watts: float = _env_float("TUYA_SOLAR_AUTOMATION_13A_WATTS", 4000.0)
 
     api_default_hours: int = _env_int("API_DEFAULT_HOURS", 24)
     api_max_points: int = _env_int("API_MAX_POINTS", 5000)

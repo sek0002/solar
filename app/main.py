@@ -18,7 +18,7 @@ from fastapi.templating import Jinja2Templates
 
 from app.config import settings
 from app.database import Database
-from app.pollers import PollingCoordinator, TuyaCloudClient
+from app.pollers import PollingCoordinator, TuyaCloudClient, tuya_command_lock
 
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -28,9 +28,6 @@ templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 database = Database(settings.database_path, settings.timezone_name)
 coordinator = PollingCoordinator(settings, database)
 tuya_client = TuyaCloudClient(settings)
-tuya_command_lock = asyncio.Lock()
-
-
 def _tuya_status_map(status_payload: list[dict[str, object]]) -> dict[str, object]:
     return {
         str(item.get("code")): item.get("value")
@@ -713,6 +710,7 @@ async def api_status() -> dict[str, object]:
         "pollers": _with_network_ble_placeholder(await coordinator.statuses.snapshot()),
         "latest_samples": database.get_latest_samples(),
         "tuya_device_status": tuya_device_status,
+        "tuya_automation_enabled": settings.tuya_solar_automation_enabled,
     }
 
 
@@ -790,6 +788,15 @@ async def api_tuya_charger_current(payload: dict[str, object]) -> dict[str, obje
         "was_on": was_on,
         "device_status": restored_status,
     }
+
+
+@app.post("/api/tuya/automation")
+async def api_tuya_automation(payload: dict[str, object]) -> dict[str, object]:
+    enabled = payload.get("enabled")
+    if not isinstance(enabled, bool):
+        raise HTTPException(status_code=400, detail="Expected boolean 'enabled' field")
+    settings.tuya_solar_automation_enabled = enabled
+    return {"status": "ok", "enabled": settings.tuya_solar_automation_enabled}
 
 
 def _check_ingest_token(token: Optional[str]) -> None:

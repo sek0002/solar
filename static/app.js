@@ -15,6 +15,9 @@ const evBatteryLabel = document.querySelector("#ev-battery-label");
 const chargerToggle = document.querySelector("#charger-toggle");
 const chargerToggleWrap = document.querySelector("#charger-toggle-wrap");
 const chargerToggleStatus = document.querySelector("#charger-toggle-status");
+const automationToggle = document.querySelector("#automation-toggle");
+const automationToggleWrap = document.querySelector("#automation-toggle-wrap");
+const automationToggleStatus = document.querySelector("#automation-toggle-status");
 const chargerCurrentWrap = document.querySelector("#charger-current-wrap");
 const chargerCurrentOptions = Array.from(document.querySelectorAll(".charger-current-option"));
 const topbarGauge = document.querySelector("#topbar-gauge");
@@ -39,6 +42,8 @@ const pageLoadDefaultHours = 12;
 let chargerCommandInFlight = false;
 let chargerPendingMessage = "";
 let chargerStateOverride = null;
+let automationCommandInFlight = false;
+let automationEnabledOverride = null;
 
 function setChargerControlsBusy(isBusy) {
   chargerCommandInFlight = isBusy;
@@ -48,6 +53,13 @@ function setChargerControlsBusy(isBusy) {
   chargerCurrentOptions.forEach((option) => {
     option.disabled = isBusy;
   });
+}
+
+function setAutomationControlBusy(isBusy) {
+  automationCommandInFlight = isBusy;
+  if (automationToggle) {
+    automationToggle.disabled = isBusy;
+  }
 }
 
 function resetVersionedClientCache() {
@@ -510,6 +522,30 @@ function getChargerStatusLabel(chargerState, isEnabled) {
   return "Charger n/a";
 }
 
+function getAutomationEnabled(statusPayload) {
+  if (typeof automationEnabledOverride === "boolean") {
+    return automationEnabledOverride;
+  }
+  return Boolean(statusPayload && statusPayload.tuya_automation_enabled);
+}
+
+function renderAutomationToggle(statusPayload) {
+  if (!automationToggle || !automationToggleWrap) {
+    return;
+  }
+  if (!tuyaControlEnabled) {
+    automationToggleWrap.hidden = true;
+    return;
+  }
+  automationToggleWrap.hidden = false;
+  const isEnabled = getAutomationEnabled(statusPayload);
+  automationToggle.checked = isEnabled;
+  automationToggle.disabled = automationCommandInFlight;
+  if (automationToggleStatus) {
+    automationToggleStatus.textContent = isEnabled ? "Auto on" : "Auto off";
+  }
+}
+
 function renderChargerToggle(samples, directStatus = null) {
   if (!chargerToggle || !chargerToggleWrap) {
     return;
@@ -829,15 +865,34 @@ function formatCollectorLabel(name) {
     .replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
+function formatCollectorShortLabel(name) {
+  if (name === "tuya_automation") {
+    return "Auto";
+  }
+  return formatCollectorLabel(name);
+}
+
+function getCollectorIcon(name) {
+  if (name === "tuya_automation") {
+    return "A";
+  }
+  return null;
+}
+
+function getCollectorChipExtraClass(name) {
+  return name === "tuya_automation" ? "collector-chip-automation" : "";
+}
+
 function renderCollectorStrip(items) {
   if (!collectorStrip) {
     return;
   }
   collectorStrip.innerHTML = (items || [])
     .map((item) => `
-      <div class="collector-chip ${getCollectorChipClass(item.state || "")}" title="${formatCollectorLabel(item.name)}: ${item.state || "unknown"}">
+      <div class="collector-chip ${getCollectorChipClass(item.state || "")} ${getCollectorChipExtraClass(item.name)}" title="${formatCollectorLabel(item.name)}: ${item.state || "unknown"}">
         <span class="collector-chip-light" aria-hidden="true"></span>
-        <span>${formatCollectorLabel(item.name)}</span>
+        ${getCollectorIcon(item.name) ? `<span class="collector-chip-icon" aria-hidden="true">${getCollectorIcon(item.name)}</span>` : ""}
+        <span>${formatCollectorShortLabel(item.name)}</span>
       </div>
     `)
     .join("");
@@ -1972,6 +2027,7 @@ function renderDashboardState(statusPayload, items, cumulativeSeries, energySumm
     .join("");
   renderTopbarGauge(statusPayload.latest_samples);
   renderBydTopbarGauge(statusPayload.latest_samples, statusPayload.pollers);
+  renderAutomationToggle(statusPayload);
   renderChargerToggle(statusPayload.latest_samples, directChargerStatus);
   renderBleBatteryState(statusPayload.pollers);
   renderEvBatteryState(statusPayload.latest_samples, statusPayload.pollers);
@@ -2086,6 +2142,7 @@ async function refresh() {
     renderCollectorStrip([]);
     renderTopbarGauge([]);
     renderBydTopbarGauge([], []);
+    renderAutomationToggle(null);
     renderChargerToggle([], null);
     renderBleBatteryState([]);
     renderEvBatteryState([], []);
@@ -2213,6 +2270,37 @@ if (chargerToggle) {
       chargerPendingMessage = "";
       setChargerControlsBusy(false);
       renderChargerToggle([], null);
+    }
+  });
+}
+
+if (automationToggle) {
+  automationToggle.addEventListener("change", async () => {
+    const desiredState = automationToggle.checked;
+    const previousOverride = automationEnabledOverride;
+    automationEnabledOverride = desiredState;
+    setAutomationControlBusy(true);
+    renderAutomationToggle(null);
+    try {
+      const response = await fetch("/api/tuya/automation", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled: desiredState })
+      });
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+      const payload = await response.json();
+      automationEnabledOverride = Boolean(payload.enabled);
+      renderAutomationToggle({ tuya_automation_enabled: automationEnabledOverride });
+      scheduleRefresh(250);
+    } catch (error) {
+      console.error("Unable to update automation state", error);
+      automationEnabledOverride = previousOverride;
+      automationToggle.checked = !desiredState;
+    } finally {
+      setAutomationControlBusy(false);
+      renderAutomationToggle({ tuya_automation_enabled: getAutomationEnabled({ tuya_automation_enabled: automationEnabledOverride }) });
     }
   });
 }
