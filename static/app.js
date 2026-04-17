@@ -19,7 +19,6 @@ const automationToggle = document.querySelector("#automation-toggle");
 const automationToggleWrap = document.querySelector("#automation-toggle-wrap");
 const automationToggleStatus = document.querySelector("#automation-toggle-status");
 const chargerCurrentWrap = document.querySelector("#charger-current-wrap");
-const chargerCurrentStatus = document.querySelector("#charger-current-status");
 const chargerCurrentOptions = Array.from(document.querySelectorAll(".charger-current-option"));
 const topbarGauge = document.querySelector("#topbar-gauge");
 const topbarSolarValue = document.querySelector("#topbar-solar-value");
@@ -647,9 +646,6 @@ function renderChargerToggle(samples, directStatus = null) {
     button.title = chargerState.current === null ? "Current unavailable" : `${current}A`;
     button.disabled = chargerCommandInFlight;
   });
-  if (chargerCurrentStatus) {
-    chargerCurrentStatus.textContent = chargerState && chargerState.current !== null ? `${chargerState.current}A set` : "Current n/a";
-  }
 }
 
 function getDayKey(dateLike) {
