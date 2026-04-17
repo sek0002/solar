@@ -23,7 +23,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
-database = Database(settings.database_path)
+database = Database(settings.database_path, settings.timezone_name)
 coordinator = PollingCoordinator(settings, database)
 
 
@@ -653,6 +653,11 @@ async def api_status() -> dict[str, object]:
         "pollers": _with_network_ble_placeholder(await coordinator.statuses.snapshot()),
         "latest_samples": database.get_latest_samples(),
     }
+
+
+@app.get("/api/cumulative")
+async def api_cumulative() -> dict[str, object]:
+    return {"items": database.get_cumulative_samples()}
 
 
 def _check_ingest_token(token: Optional[str]) -> None:

@@ -1341,11 +1341,6 @@ function buildSummaryData(items, windowState) {
   const weeklyWindow = getTrailingWindow(referenceEnd, 30 * 24 * 3600000);
   return {
     series,
-    cumulative: {
-      solar: integrateSeriesKwh(series.solar, "solar_generation_watts", windowState),
-      grid: integrateSeriesKwh(series.grid, "grid_usage_watts", windowState),
-      ev: integrateSeriesKwh(series.ev, "charging_rate_w_per_min", windowState)
-    },
     generation: {
       hourly: {
         solar: buildEnergyTotals(series.solar, "solar_generation_watts", getHourKey, getStartOfNextHour, hourlyWindow),
@@ -1665,11 +1660,11 @@ function aggregateLineSeries(points, windowState, maxPoints = 720, mode = "avera
     .filter(Boolean);
 }
 
-function renderDashboardCharts(items, windowState) {
+function renderDashboardCharts(items, windowState, cumulativeSeries) {
   try {
     const summaryData = buildSummaryData(items, windowState);
     renderBleSolarChart(items, windowState);
-    renderCumulativeChart(summaryData, windowState);
+    renderCumulativeChart(cumulativeSeries);
     renderGenerationSummaryCharts(summaryData);
     return true;
   } catch (error) {
@@ -1729,11 +1724,30 @@ function renderBleSolarChart(items, windowState) {
   ], "rate");
 }
 
-function renderCumulativeChart(summaryData, windowState) {
+function buildCumulativeWindowState(seriesList) {
+  const timestamps = seriesList
+    .reduce((allPoints, series) => allPoints.concat(series || []), [])
+    .map((item) => toChartTime(item.observed_at).getTime())
+    .filter((value) => Number.isFinite(value));
+
+  if (!timestamps.length) {
+    return buildWindowState(new Date(), new Date());
+  }
+
+  return buildWindowState(new Date(Math.min(...timestamps)), new Date(Math.max(...timestamps)));
+}
+
+function renderCumulativeChart(cumulativeSeries) {
   const dark = getTheme() === "dark";
-  const solarKwh = summaryData.cumulative.solar;
-  const gridKwh = summaryData.cumulative.grid;
-  const evKwh = summaryData.cumulative.ev;
+  const solarKwh = Array.isArray(cumulativeSeries && cumulativeSeries.solar) ? cumulativeSeries.solar : [];
+  const gridKwh = Array.isArray(cumulativeSeries && cumulativeSeries.grid) ? cumulativeSeries.grid : [];
+  const evKwh = Array.isArray(cumulativeSeries && cumulativeSeries.ev) ? cumulativeSeries.ev : [];
+  const chartWindowState = buildCumulativeWindowState([solarKwh, gridKwh, evKwh]);
+
+  if (!solarKwh.length && !gridKwh.length && !evKwh.length) {
+    renderChartPlaceholder(cumulativeChartElement, "No cumulative data available");
+    return;
+  }
 
   createLineChart(cumulativeChartElement, [
     {
@@ -1741,7 +1755,7 @@ function renderCumulativeChart(summaryData, windowState) {
       data: aggregateLineSeries(solarKwh.map((item) => ({
         x: toChartTime(item.observed_at).getTime(),
         y: item.cumulative_kwh
-      })), windowState, 720, "last"),
+      })), chartWindowState, 720, "last"),
       borderColor: dark ? "#8ee29d" : "#7cc98a",
       backgroundColor: dark ? "rgba(142, 226, 157, 0.14)" : "rgba(124, 201, 138, 0.12)",
       fill: true
@@ -1751,7 +1765,7 @@ function renderCumulativeChart(summaryData, windowState) {
       data: aggregateLineSeries(gridKwh.map((item) => ({
         x: toChartTime(item.observed_at).getTime(),
         y: item.cumulative_kwh
-      })), windowState, 720, "last"),
+      })), chartWindowState, 720, "last"),
       borderColor: dark ? "#7fb0ff" : "#6f96d8",
       backgroundColor: dark ? "rgba(127, 176, 255, 0.12)" : "rgba(111, 150, 216, 0.09)",
       fill: true
@@ -1761,7 +1775,7 @@ function renderCumulativeChart(summaryData, windowState) {
       data: aggregateLineSeries(evKwh.map((item) => ({
         x: toChartTime(item.observed_at).getTime(),
         y: item.cumulative_kwh
-      })), windowState, 720, "last"),
+      })), chartWindowState, 720, "last"),
       borderColor: dark ? "#ffb45b" : "#d6882e",
       backgroundColor: dark ? "rgba(255, 180, 91, 0.12)" : "rgba(214, 136, 46, 0.10)",
       fill: true
@@ -1875,7 +1889,7 @@ function isCachedRefreshUsable(cachedPayload, request) {
   return true;
 }
 
-function renderDashboardState(statusPayload, items, windowState, refreshLabel) {
+function renderDashboardState(statusPayload, items, cumulativeSeries, windowState, refreshLabel) {
   renderStatusCards(statusPayload.pollers);
   renderCollectorStrip(statusPayload.pollers);
   latestValues.innerHTML = statusPayload.latest_samples
@@ -1893,13 +1907,17 @@ function renderDashboardState(statusPayload, items, windowState, refreshLabel) {
       <tr><td>Weekly</td><td>0.00 kWh</td><td>0.00 kWh</td><td>0.00 kWh</td><td>0.00 kWh</td></tr>
       <tr><td>Monthly</td><td>0.00 kWh</td><td>0.00 kWh</td><td>0.00 kWh</td><td>0.00 kWh</td></tr>
     `;
-    renderEmptyCharts();
+    renderChartPlaceholder(bleChartElement, "No data in the selected window");
+    renderCumulativeChart(cumulativeSeries);
+    renderChartPlaceholder(hourlyChartElement, "No hourly generation data available");
+    renderChartPlaceholder(dailyChartElement, "No daily generation data available");
+    renderChartPlaceholder(weeklyChartElement, "No weekly generation data available");
     refreshText.textContent = refreshLabel || "No data in selected window";
     return;
   }
 
   renderCumulativeStats(items, statusPayload.pollers);
-  const chartsRendered = renderDashboardCharts(items, windowState);
+  const chartsRendered = renderDashboardCharts(items, windowState, cumulativeSeries);
   refreshText.textContent = chartsRendered
     ? refreshLabel
     : "Updated with chart fallback";
@@ -1914,6 +1932,7 @@ function renderCachedDashboardIfAvailable(hours, safeStart, end) {
 
   const items = Array.isArray(cachedPayload.items) ? cachedPayload.items : [];
   const statusPayload = cachedPayload.statusPayload;
+  const cumulativeSeries = cachedPayload.cumulativeSeries;
   if (!statusPayload || !Array.isArray(statusPayload.pollers) || !Array.isArray(statusPayload.latest_samples)) {
     return false;
   }
@@ -1921,6 +1940,7 @@ function renderCachedDashboardIfAvailable(hours, safeStart, end) {
   renderDashboardState(
     statusPayload,
     items,
+    cumulativeSeries,
     buildWindowState(safeStart, end),
     `Showing cached data from ${new Date(cachedPayload.cachedAt).toLocaleTimeString("en-AU", { timeZone: appTimezone })}`
   );
@@ -1946,28 +1966,33 @@ async function refresh() {
     const windowState = buildWindowState(safeStart, end);
     const request = buildRefreshRequest(hours, safeStart, end);
     const fetchLimit = getSamplesFetchLimit(hours);
-    const [statusResponse, samplesResponse] = await Promise.all([
+    const [statusResponse, samplesResponse, cumulativeResponse] = await Promise.all([
       fetch("/api/status"),
-      fetch(`/api/samples?hours=${hours}&limit=${fetchLimit}&start=${encodeURIComponent(safeStart.toISOString())}&end=${encodeURIComponent(end.toISOString())}`)
+      fetch(`/api/samples?hours=${hours}&limit=${fetchLimit}&start=${encodeURIComponent(safeStart.toISOString())}&end=${encodeURIComponent(end.toISOString())}`),
+      fetch("/api/cumulative")
     ]);
 
-    if (!statusResponse.ok || !samplesResponse.ok) {
-      throw new Error(`HTTP ${statusResponse.status}/${samplesResponse.status}`);
+    if (!statusResponse.ok || !samplesResponse.ok || !cumulativeResponse.ok) {
+      throw new Error(`HTTP ${statusResponse.status}/${samplesResponse.status}/${cumulativeResponse.status}`);
     }
 
     const statusPayload = await statusResponse.json();
     const samplesPayload = await samplesResponse.json();
+    const cumulativePayload = await cumulativeResponse.json();
     const items = Array.isArray(samplesPayload.items) ? samplesPayload.items : [];
+    const cumulativeSeries = cumulativePayload && cumulativePayload.items ? cumulativePayload.items : { solar: [], grid: [], ev: [] };
 
     saveRefreshCache({
       request,
       cachedAt: new Date().toISOString(),
       statusPayload,
-      items
+      items,
+      cumulativeSeries
     });
     renderDashboardState(
       statusPayload,
       items,
+      cumulativeSeries,
       windowState,
       items.length
         ? `Updated ${new Date().toLocaleTimeString("en-AU", { timeZone: appTimezone })}`
