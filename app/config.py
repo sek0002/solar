@@ -112,6 +112,9 @@ class Settings:
     tuya_solar_automation_6a_watts: float = _env_float("TUYA_SOLAR_AUTOMATION_6A_WATTS", 2000.0)
     tuya_solar_automation_10a_watts: float = _env_float("TUYA_SOLAR_AUTOMATION_10A_WATTS", 3000.0)
     tuya_solar_automation_13a_watts: float = _env_float("TUYA_SOLAR_AUTOMATION_13A_WATTS", 4000.0)
+    tuya_ble_guard_watts: float = _env_float("TUYA_BLE_GUARD_WATTS", 2000.0)
+    tuya_ble_guard_window_minutes: float = _env_float("TUYA_BLE_GUARD_WINDOW_MINUTES", 15.0)
+    tuya_ble_guard_cooldown_minutes: float = _env_float("TUYA_BLE_GUARD_COOLDOWN_MINUTES", 30.0)
 
     api_default_hours: int = _env_int("API_DEFAULT_HOURS", 24)
     api_max_points: int = _env_int("API_MAX_POINTS", 5000)

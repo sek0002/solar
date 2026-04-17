@@ -1095,6 +1095,7 @@ class TuyaSolarChargingAutomation:
         self._stopped = asyncio.Event()
         self._client = TuyaCloudClient(settings)
         self._timezone = pytz.timezone(settings.timezone_name)
+        self._ble_guard_hold_until: Optional[datetime] = None
 
     async def run(self) -> None:
         await self.statuses.update(
@@ -1145,7 +1146,11 @@ class TuyaSolarChargingAutomation:
         self._stopped.set()
 
     def _evaluate_target(self) -> dict[str, Any]:
-        now_local = datetime.now(timezone.utc).astimezone(self._timezone)
+        now_utc = datetime.now(timezone.utc)
+        now_local = now_utc.astimezone(self._timezone)
+        ble_guard = self._evaluate_ble_guard(now_utc)
+        if ble_guard is not None:
+            return ble_guard
         if 0 <= now_local.hour < 6:
             return {
                 "mode": "offpeak",
@@ -1154,11 +1159,11 @@ class TuyaSolarChargingAutomation:
             }
 
         window_minutes = max(1.0, float(self.settings.tuya_solar_automation_window_minutes))
-        since = datetime.now(timezone.utc) - timedelta(minutes=window_minutes)
+        since = now_utc - timedelta(minutes=window_minutes)
         local_site_samples = [
             item for item in self.database.get_samples_range(
                 since=since,
-                until=datetime.now(timezone.utc),
+                until=now_utc,
                 limit=5000,
             )
             if item.get("source") == "local_site" and item.get("solar_generation_watts") is not None
@@ -1234,6 +1239,75 @@ class TuyaSolarChargingAutomation:
             "target_enabled": target_enabled,
             "target_current": target_current,
             "latest_observed_at": str(local_site_samples[-1]["observed_at"]),
+        }
+
+    def _evaluate_ble_guard(self, now_utc: datetime) -> dict[str, Any] | None:
+        if self._ble_guard_hold_until is not None and now_utc < self._ble_guard_hold_until:
+            return {
+                "mode": "target",
+                "reason": "BLE grid guard cooldown active",
+                "target_enabled": False,
+                "target_current": None,
+                "ble_guard_active": True,
+                "ble_guard_hold_until": self._ble_guard_hold_until.isoformat(),
+                "ble_guard_remaining_minutes": round((self._ble_guard_hold_until - now_utc).total_seconds() / 60.0, 1),
+            }
+
+        window_minutes = max(1.0, float(self.settings.tuya_ble_guard_window_minutes))
+        since = now_utc - timedelta(minutes=window_minutes)
+        ble_samples = [
+            item for item in self.database.get_samples_range(
+                since=since,
+                until=now_utc,
+                limit=5000,
+            )
+            if item.get("source") == "ble" and item.get("grid_usage_watts") is not None
+        ]
+        if len(ble_samples) < 2:
+            return None
+
+        first_observed_at = self._parse_observed_at(str(ble_samples[0]["observed_at"]))
+        last_observed_at = self._parse_observed_at(str(ble_samples[-1]["observed_at"]))
+        span_seconds = max(0.0, (last_observed_at - first_observed_at).total_seconds())
+        allowed_gap_seconds = max(30.0, self.settings.ble_retry_delay_seconds * 2.0)
+        minimum_span_seconds = max(60.0, window_minutes * 60.0 - allowed_gap_seconds)
+        if span_seconds < minimum_span_seconds:
+            return None
+
+        ble_values = [
+            float(item["grid_usage_watts"])
+            for item in ble_samples
+            if item.get("grid_usage_watts") is not None
+        ]
+        if not ble_values:
+            return None
+
+        min_ble = min(ble_values)
+        max_ble = max(ble_values)
+        average_ble = sum(ble_values) / len(ble_values)
+        guard_watts = float(self.settings.tuya_ble_guard_watts)
+        if min_ble < guard_watts:
+            return None
+
+        cooldown_minutes = max(1.0, float(self.settings.tuya_ble_guard_cooldown_minutes))
+        self._ble_guard_hold_until = now_utc + timedelta(minutes=cooldown_minutes)
+        return {
+            "mode": "target",
+            "reason": "BLE grid guard triggered",
+            "target_enabled": False,
+            "target_current": None,
+            "ble_guard_active": True,
+            "ble_guard_triggered": True,
+            "ble_guard_watts": guard_watts,
+            "ble_guard_window_minutes": window_minutes,
+            "ble_guard_cooldown_minutes": cooldown_minutes,
+            "ble_guard_hold_until": self._ble_guard_hold_until.isoformat(),
+            "ble_sample_count": len(ble_samples),
+            "ble_window_span_seconds": round(span_seconds, 1),
+            "min_ble_watts": round(min_ble, 1),
+            "max_ble_watts": round(max_ble, 1),
+            "average_ble_watts": round(average_ble, 1),
+            "latest_observed_at": str(ble_samples[-1]["observed_at"]),
         }
 
     async def _apply_target(self, client: httpx.AsyncClient, evaluation: dict[str, Any]) -> dict[str, Any]:

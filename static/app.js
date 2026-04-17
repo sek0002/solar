@@ -530,6 +530,37 @@ function getAutomationEnabled(statusPayload) {
   return Boolean(statusPayload && statusPayload.tuya_automation_enabled);
 }
 
+function getAutomationStatusLabel(statusPayload, isEnabled) {
+  if (!isEnabled) {
+    return "Auto off";
+  }
+  const automationPoller = statusPayload && Array.isArray(statusPayload.pollers)
+    ? statusPayload.pollers.find((item) => item && item.name === "tuya_automation")
+    : null;
+  const details = automationPoller && automationPoller.details && typeof automationPoller.details === "object"
+    ? automationPoller.details
+    : null;
+  if (!details) {
+    return "Auto on";
+  }
+  if (details.ble_guard_active) {
+    return "Grid hold";
+  }
+  if (details.mode === "offpeak") {
+    return "Off-peak";
+  }
+  if (details.target_enabled === false) {
+    return "Off target";
+  }
+  if (details.target_enabled === true && Number.isFinite(Number(details.target_current))) {
+    return `On ${Number(details.target_current)}A`;
+  }
+  if (details.mode === "waiting") {
+    return "Waiting";
+  }
+  return "Auto on";
+}
+
 function renderAutomationToggle(statusPayload) {
   if (!automationToggle || !automationToggleWrap) {
     return;
@@ -543,7 +574,7 @@ function renderAutomationToggle(statusPayload) {
   automationToggle.checked = isEnabled;
   automationToggle.disabled = automationCommandInFlight;
   if (automationToggleStatus) {
-    automationToggleStatus.textContent = isEnabled ? "Auto on" : "Auto off";
+    automationToggleStatus.textContent = getAutomationStatusLabel(statusPayload, isEnabled);
   }
 }
 
