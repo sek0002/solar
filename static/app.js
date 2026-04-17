@@ -38,6 +38,7 @@ const appCacheVersion = (window.SOLAR_PWA && window.SOLAR_PWA.appVersion) || "de
 const pageLoadDefaultHours = 12;
 let chargerCommandInFlight = false;
 let chargerPendingMessage = "";
+let chargerStateOverride = null;
 
 function setChargerControlsBusy(isBusy) {
   chargerCommandInFlight = isBusy;
@@ -432,6 +433,9 @@ function renderBydTopbarGauge(samples, pollers) {
 }
 
 function getTuyaSwitchState(samples) {
+  if (chargerStateOverride) {
+    return chargerStateOverride;
+  }
   const tuyaSample = (samples || []).find((item) => item.source === "tuya_ev");
   const statusCodes = tuyaSample && tuyaSample.raw_payload && Array.isArray(tuyaSample.raw_payload.status_codes)
     ? tuyaSample.raw_payload.status_codes
@@ -443,6 +447,18 @@ function getTuyaSwitchState(samples) {
     enabled: switchItem && typeof switchItem.value === "boolean" ? switchItem.value : null,
     workState: workStateItem && typeof workStateItem.value === "string" ? workStateItem.value : null,
     current: currentItem && Number.isFinite(Number(currentItem.value)) ? Number(currentItem.value) : null
+  };
+}
+
+function setChargerStateOverrideFromDeviceStatus(deviceStatus) {
+  if (!deviceStatus || typeof deviceStatus !== "object") {
+    chargerStateOverride = null;
+    return;
+  }
+  chargerStateOverride = {
+    enabled: typeof deviceStatus.switch === "boolean" ? deviceStatus.switch : null,
+    workState: typeof deviceStatus.work_state === "string" ? deviceStatus.work_state : null,
+    current: Number.isFinite(Number(deviceStatus.charge_cur_set)) ? Number(deviceStatus.charge_cur_set) : null
   };
 }
 
@@ -2154,6 +2170,13 @@ if (chargerToggle) {
   chargerToggle.addEventListener("change", async () => {
     const desiredState = chargerToggle.checked;
     chargerPendingMessage = desiredState ? "switching on..." : "switching off...";
+    const previousOverride = chargerStateOverride ? { ...chargerStateOverride } : null;
+    chargerStateOverride = {
+      ...(previousOverride || {}),
+      enabled: desiredState,
+      workState: desiredState ? "charger_wait" : "charge_end",
+      current: previousOverride && previousOverride.current !== undefined ? previousOverride.current : null
+    };
     setChargerControlsBusy(true);
     renderChargerToggle([]);
     try {
@@ -2165,13 +2188,18 @@ if (chargerToggle) {
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}`);
       }
+      const payload = await response.json();
+      setChargerStateOverrideFromDeviceStatus(payload.device_status);
+      renderChargerToggle([]);
       scheduleRefresh(250);
     } catch (error) {
       console.error("Unable to update charger state", error);
       chargerToggle.checked = !desiredState;
+      chargerStateOverride = previousOverride;
     } finally {
       chargerPendingMessage = "";
       setChargerControlsBusy(false);
+      renderChargerToggle([]);
     }
   });
 }
@@ -2183,6 +2211,11 @@ chargerCurrentOptions.forEach((button) => {
       return;
     }
     chargerPendingMessage = `setting ${current}A...`;
+    const previousOverride = chargerStateOverride ? { ...chargerStateOverride } : null;
+    chargerStateOverride = {
+      ...(previousOverride || {}),
+      current,
+    };
     setChargerControlsBusy(true);
     renderChargerToggle([]);
     try {
@@ -2194,12 +2227,17 @@ chargerCurrentOptions.forEach((button) => {
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}`);
       }
+      const payload = await response.json();
+      setChargerStateOverrideFromDeviceStatus(payload.device_status);
+      renderChargerToggle([]);
       scheduleRefresh(250);
     } catch (error) {
       console.error("Unable to update charger current", error);
+      chargerStateOverride = previousOverride;
     } finally {
       chargerPendingMessage = "";
       setChargerControlsBusy(false);
+      renderChargerToggle([]);
     }
   });
 });
