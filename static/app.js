@@ -434,6 +434,19 @@ function getTuyaSwitchState(samples) {
   };
 }
 
+function getChargerEnabledState(chargerState) {
+  if (!chargerState) {
+    return null;
+  }
+  if (chargerState.workState === "charger_charging") {
+    return true;
+  }
+  if (chargerState.workState === "charge_end") {
+    return false;
+  }
+  return chargerState.enabled;
+}
+
 function renderChargerToggle(samples) {
   if (!chargerToggle || !chargerToggleWrap) {
     return;
@@ -450,13 +463,14 @@ function renderChargerToggle(samples) {
     chargerCurrentWrap.hidden = false;
   }
   const chargerState = getTuyaSwitchState(samples);
-  chargerToggle.checked = chargerState.enabled === true;
+  const isEnabled = getChargerEnabledState(chargerState);
+  chargerToggle.checked = isEnabled === true;
   if (chargerToggleStatus) {
-    chargerToggleStatus.textContent = chargerState.enabled === null
+    chargerToggleStatus.textContent = isEnabled === null
       ? "Charger n/a"
-      : chargerState.enabled
-        ? (chargerState.workState || "Charging on").replace(/_/g, " ")
-        : (chargerState.workState || "Charger off").replace(/_/g, " ");
+      : isEnabled
+        ? (chargerState.workState || "charger_charging").replace(/_/g, " ")
+        : (chargerState.workState || "charge_end").replace(/_/g, " ");
   }
   chargerToggle.title = chargerToggleStatus ? chargerToggleStatus.textContent : "";
   chargerCurrentOptions.forEach((button) => {

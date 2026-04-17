@@ -21,65 +21,69 @@
   <main class="shell">
     <section class="topbar">
       <div class="controls-inline">
-        <div class="controls">
-          <label for="hours">Window</label>
-          <div class="window-readout">
-            <select id="window-preset" aria-label="Window preset">
-              <option value="1">1 hour</option>
-              <option value="6">6 hours</option>
-              <option value="12">12 hours</option>
-              <option value="24" selected>24 hours</option>
-              <option value="48">48 hours</option>
-              <option value="72">72 hours</option>
-              <option value="168">7 days</option>
-              <option value="custom">Custom</option>
-            </select>
-            <input id="hours" type="number" min="1" max="168" step="1" value="24">
-            <span>hours</span>
-          </div>
-        </div>
-        <div class="controls">
-          <label for="start-date">Start</label>
-          <div class="datetime-controls">
-            <input id="start-date" type="date">
-            <input id="start-time" type="time" step="60">
-          </div>
-        </div>
-        <nav class="page-tabs topbar-tabs topbar-switch" aria-label="Pages">
-          <a class="page-tab is-active" href="/">Dashboard</a>
-          <a class="page-tab" href="/byd">BYD</a>
-        </nav>
-        <div class="topbar-gauges" aria-label="Live topbar gauges">
-          <div id="topbar-gauge" class="topbar-gauge" aria-label="Solar generation and BLE gauge">
-            <div class="topbar-gauge-ble-ring"></div>
-            <div class="topbar-gauge-solar-ring">
-              <div class="topbar-gauge-core">
-                <span class="topbar-gauge-label">Solar</span>
-                <strong id="topbar-solar-value" class="topbar-gauge-value">n/a</strong>
-                <small id="topbar-ble-value" class="topbar-gauge-subvalue">BLE n/a</small>
-              </div>
+        <div class="controls-inline-primary">
+          <div class="controls">
+            <label for="hours">Window</label>
+            <div class="window-readout">
+              <select id="window-preset" aria-label="Window preset">
+                <option value="1">1 hour</option>
+                <option value="6">6 hours</option>
+                <option value="12">12 hours</option>
+                <option value="24" selected>24 hours</option>
+                <option value="48">48 hours</option>
+                <option value="72">72 hours</option>
+                <option value="168">7 days</option>
+                <option value="custom">Custom</option>
+              </select>
+              <input id="hours" type="number" min="1" max="168" step="1" value="24">
+              <span>hours</span>
             </div>
-            <div class="topbar-gauge-inner-ticks"></div>
           </div>
-          <div id="topbar-byd-gauge" class="topbar-gauge" aria-label="BYD GL and EV SoC gauge">
-            <div class="topbar-gauge-byd-ring"></div>
-            <div class="topbar-gauge-solar-ring topbar-gauge-byd-solar-ring">
-              <div class="topbar-gauge-core">
-                <span class="topbar-gauge-label">EV</span>
-                <strong id="topbar-byd-value" class="topbar-gauge-value">n/a</strong>
-                <small id="topbar-byd-subvalue" class="topbar-gauge-subvalue">SoC n/a</small>
-              </div>
+          <div class="controls">
+            <label for="start-date">Start</label>
+            <div class="datetime-controls">
+              <input id="start-date" type="date">
+              <input id="start-time" type="time" step="60">
             </div>
-            <div class="topbar-gauge-inner-ticks"></div>
           </div>
+          <nav class="page-tabs topbar-tabs topbar-switch" aria-label="Pages">
+            <a class="page-tab is-active" href="/">Dashboard</a>
+            <a class="page-tab" href="/byd">BYD</a>
+          </nav>
         </div>
-        <button id="reset-range" class="theme-toggle" type="button" aria-label="Reset start time">
-          Reset
-        </button>
-        <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Toggle dark mode">
-          Dark mode
-        </button>
-        <div id="collector-strip" class="collector-strip" aria-label="Collector status summary"></div>
+        <div class="controls-inline-secondary">
+          <button id="reset-range" class="theme-toggle" type="button" aria-label="Reset start time">
+            Reset
+          </button>
+          <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Toggle dark mode">
+            Dark mode
+          </button>
+          <div class="topbar-gauges" aria-label="Live topbar gauges">
+            <div id="topbar-gauge" class="topbar-gauge topbar-gauge-compact" aria-label="Solar generation and BLE gauge">
+              <div class="topbar-gauge-ble-ring"></div>
+              <div class="topbar-gauge-solar-ring">
+                <div class="topbar-gauge-core">
+                  <span class="topbar-gauge-label">Solar</span>
+                  <strong id="topbar-solar-value" class="topbar-gauge-value">n/a</strong>
+                  <small id="topbar-ble-value" class="topbar-gauge-subvalue">BLE n/a</small>
+                </div>
+              </div>
+              <div class="topbar-gauge-inner-ticks"></div>
+            </div>
+            <div id="topbar-byd-gauge" class="topbar-gauge topbar-gauge-compact" aria-label="BYD GL and EV SoC gauge">
+              <div class="topbar-gauge-byd-ring"></div>
+              <div class="topbar-gauge-solar-ring topbar-gauge-byd-solar-ring">
+                <div class="topbar-gauge-core">
+                  <span class="topbar-gauge-label">EV</span>
+                  <strong id="topbar-byd-value" class="topbar-gauge-value">n/a</strong>
+                  <small id="topbar-byd-subvalue" class="topbar-gauge-subvalue">SoC n/a</small>
+                </div>
+              </div>
+              <div class="topbar-gauge-inner-ticks"></div>
+            </div>
+          </div>
+          <div id="collector-strip" class="collector-strip" aria-label="Collector status summary"></div>
+        </div>
       </div>
       <div class="status-inline">
         <span id="last-refresh" class="last-refresh status-refresh">Loading...</span>

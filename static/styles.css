@@ -79,7 +79,7 @@ body {
 .collector-strip {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   flex-wrap: wrap;
   min-width: 0;
 }
@@ -87,14 +87,14 @@ body {
 .collector-chip {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
-  padding: 8px 10px;
+  gap: 6px;
+  padding: 6px 8px;
   border-radius: 999px;
   border: 1px solid var(--line);
   background: var(--panel);
   box-shadow: var(--shadow);
   color: var(--muted);
-  font-size: 0.82rem;
+  font-size: 0.76rem;
   line-height: 1;
   white-space: nowrap;
 }
@@ -468,12 +468,22 @@ body {
 }
 
 .controls-inline {
-  display: flex;
-  gap: 10px;
-  align-items: center;
-  flex-wrap: wrap;
-  row-gap: 2px;
+  display: grid;
+  gap: 6px;
   min-width: 0;
+}
+
+.controls-inline-primary,
+.controls-inline-secondary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.controls-inline-secondary {
+  gap: 6px;
 }
 
 h2,
@@ -522,6 +532,51 @@ label {
   cursor: pointer;
   box-shadow: var(--shadow);
   white-space: nowrap;
+}
+
+.controls-inline-secondary .theme-toggle {
+  padding: 7px 10px;
+  font-size: 0.84rem;
+  border-radius: 14px;
+}
+
+.topbar-gauge-compact {
+  width: 94px;
+  height: 94px;
+}
+
+.topbar-gauge-compact .topbar-gauge-ble-ring,
+.topbar-gauge-compact .topbar-gauge-byd-ring,
+.topbar-gauge-compact .topbar-gauge-inner-ticks {
+  inset: 12px;
+  -webkit-mask: radial-gradient(circle at center, transparent 0 29px, #000 29px 33px, transparent 33px 100%);
+  mask: radial-gradient(circle at center, transparent 0 29px, #000 29px 33px, transparent 33px 100%);
+}
+
+.topbar-gauge-compact .topbar-gauge-solar-ring {
+  inset: 13px;
+}
+
+.topbar-gauge-compact .topbar-gauge-solar-ring::after {
+  inset: 11px;
+}
+
+.topbar-gauge-compact .topbar-gauge-core {
+  inset: 24px;
+  gap: 2px;
+}
+
+.topbar-gauge-compact .topbar-gauge-label {
+  font-size: 0.56rem;
+  letter-spacing: 0.08em;
+}
+
+.topbar-gauge-compact .topbar-gauge-value {
+  font-size: 0.88rem;
+}
+
+.topbar-gauge-compact .topbar-gauge-subvalue {
+  font-size: 0.5rem;
 }
 
 .last-refresh {
@@ -945,6 +1000,11 @@ input[type="range"] {
   }
 
   .controls-inline {
+    gap: 8px;
+  }
+
+  .controls-inline-primary,
+  .controls-inline-secondary {
     flex-direction: column;
     align-items: stretch;
   }
