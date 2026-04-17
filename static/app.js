@@ -1205,14 +1205,15 @@ function renderEvBatteryState(samples, pollers) {
 
 function renderCumulativeStats(energySummary) {
   const totals = (energySummary && energySummary.totals) || {};
-  const daily = totals.daily || { solar: 0, grid: 0, ev: 0, net: 0 };
-  const weekly = totals.weekly || { solar: 0, grid: 0, ev: 0, net: 0 };
-  const monthly = totals.monthly || { solar: 0, grid: 0, ev: 0, net: 0 };
+  const daily = totals.daily || { solar: 0, grid: 0, offpeak: 0, ev: 0, net: 0 };
+  const weekly = totals.weekly || { solar: 0, grid: 0, offpeak: 0, ev: 0, net: 0 };
+  const monthly = totals.monthly || { solar: 0, grid: 0, offpeak: 0, ev: 0, net: 0 };
   totalsTableBody.innerHTML = `
     <tr>
       <td>Daily</td>
       <td>${Number(daily.solar || 0).toFixed(2)} kWh</td>
       <td>${Number(daily.grid || 0).toFixed(2)} kWh</td>
+      <td>${Number(daily.offpeak || 0).toFixed(2)} kWh</td>
       <td>${Number(daily.ev || 0).toFixed(2)} kWh</td>
       <td>${Number(daily.net || 0).toFixed(2)} kWh</td>
     </tr>
@@ -1220,6 +1221,7 @@ function renderCumulativeStats(energySummary) {
       <td>Weekly</td>
       <td>${Number(weekly.solar || 0).toFixed(2)} kWh</td>
       <td>${Number(weekly.grid || 0).toFixed(2)} kWh</td>
+      <td>${Number(weekly.offpeak || 0).toFixed(2)} kWh</td>
       <td>${Number(weekly.ev || 0).toFixed(2)} kWh</td>
       <td>${Number(weekly.net || 0).toFixed(2)} kWh</td>
     </tr>
@@ -1227,6 +1229,7 @@ function renderCumulativeStats(energySummary) {
       <td>Monthly</td>
       <td>${Number(monthly.solar || 0).toFixed(2)} kWh</td>
       <td>${Number(monthly.grid || 0).toFixed(2)} kWh</td>
+      <td>${Number(monthly.offpeak || 0).toFixed(2)} kWh</td>
       <td>${Number(monthly.ev || 0).toFixed(2)} kWh</td>
       <td>${Number(monthly.net || 0).toFixed(2)} kWh</td>
     </tr>
@@ -1553,16 +1556,19 @@ function renderDashboardCharts(items, windowState, cumulativeSeries, energySumma
         hourly: {
           solar: toEnergyMap(energySummary && energySummary.generation && energySummary.generation.hourly && energySummary.generation.hourly.solar),
           grid: toEnergyMap(energySummary && energySummary.generation && energySummary.generation.hourly && energySummary.generation.hourly.grid),
+          offpeak: toEnergyMap(energySummary && energySummary.generation && energySummary.generation.hourly && energySummary.generation.hourly.offpeak),
           ev: toEnergyMap(energySummary && energySummary.generation && energySummary.generation.hourly && energySummary.generation.hourly.ev)
         },
         daily: {
           solar: toEnergyMap(energySummary && energySummary.generation && energySummary.generation.daily && energySummary.generation.daily.solar),
           grid: toEnergyMap(energySummary && energySummary.generation && energySummary.generation.daily && energySummary.generation.daily.grid),
+          offpeak: toEnergyMap(energySummary && energySummary.generation && energySummary.generation.daily && energySummary.generation.daily.offpeak),
           ev: toEnergyMap(energySummary && energySummary.generation && energySummary.generation.daily && energySummary.generation.daily.ev)
         },
         weekly: {
           solar: toEnergyMap(energySummary && energySummary.generation && energySummary.generation.weekly && energySummary.generation.weekly.solar),
           grid: toEnergyMap(energySummary && energySummary.generation && energySummary.generation.weekly && energySummary.generation.weekly.grid),
+          offpeak: toEnergyMap(energySummary && energySummary.generation && energySummary.generation.weekly && energySummary.generation.weekly.offpeak),
           ev: toEnergyMap(energySummary && energySummary.generation && energySummary.generation.weekly && energySummary.generation.weekly.ev)
         }
       }
@@ -1711,6 +1717,7 @@ function renderGenerationSummaryChart(element, totalsBySource, formatter) {
   const allLabels = Array.from(new Set([
     ...totalsBySource.solar.keys(),
     ...totalsBySource.grid.keys(),
+    ...totalsBySource.offpeak.keys(),
     ...totalsBySource.ev.keys()
   ])).sort((left, right) => left.localeCompare(right));
 
@@ -1727,6 +1734,14 @@ function renderGenerationSummaryChart(element, totalsBySource, formatter) {
       label: "BLE grid",
       data: allLabels.map((label) => Number(totalsBySource.grid.get(label) || 0)),
       backgroundColor: dark ? "#7fb0ff" : "#6f96d8",
+      borderRadius: 4,
+      barPercentage: 0.88,
+      categoryPercentage: 0.74
+    },
+    {
+      label: "Off-peak grid",
+      data: allLabels.map((label) => Number(totalsBySource.offpeak.get(label) || 0)),
+      backgroundColor: dark ? "#4cc9f0" : "#3aa7cb",
       borderRadius: 4,
       barPercentage: 0.88,
       categoryPercentage: 0.74
@@ -1826,9 +1841,9 @@ function renderDashboardState(statusPayload, items, cumulativeSeries, energySumm
 
   if (!items.length) {
     totalsTableBody.innerHTML = `
-      <tr><td>Daily</td><td>0.00 kWh</td><td>0.00 kWh</td><td>0.00 kWh</td><td>0.00 kWh</td></tr>
-      <tr><td>Weekly</td><td>0.00 kWh</td><td>0.00 kWh</td><td>0.00 kWh</td><td>0.00 kWh</td></tr>
-      <tr><td>Monthly</td><td>0.00 kWh</td><td>0.00 kWh</td><td>0.00 kWh</td><td>0.00 kWh</td></tr>
+      <tr><td>Daily</td><td>0.00 kWh</td><td>0.00 kWh</td><td>0.00 kWh</td><td>0.00 kWh</td><td>0.00 kWh</td></tr>
+      <tr><td>Weekly</td><td>0.00 kWh</td><td>0.00 kWh</td><td>0.00 kWh</td><td>0.00 kWh</td><td>0.00 kWh</td></tr>
+      <tr><td>Monthly</td><td>0.00 kWh</td><td>0.00 kWh</td><td>0.00 kWh</td><td>0.00 kWh</td><td>0.00 kWh</td></tr>
     `;
     renderChartPlaceholder(bleChartElement, "No data in the selected window");
     renderCumulativeChart(cumulativeSeries, windowState);

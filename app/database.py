@@ -337,6 +337,17 @@ class Database:
             (source,),
         ).fetchone()
         if has_cache:
+            if source == "ble":
+                has_offpeak_cache = connection.execute(
+                    """
+                    SELECT 1
+                    FROM energy_buckets
+                    WHERE source = 'ble_offpeak'
+                    LIMIT 1
+                    """
+                ).fetchone()
+                if not has_offpeak_cache:
+                    self._rebuild_energy_bucket_cache(connection, source)
             return
 
         self._rebuild_energy_bucket_cache(connection, source)
@@ -573,7 +584,7 @@ class Database:
                 ORDER BY observed_at ASC
                 """
             ).fetchall()
-            bucket_totals = self._build_bucket_totals_from_rows(rows)
+            bucket_totals = self._build_bucket_totals_from_rows(rows, split_offpeak=True)
         elif source == "byd_ev":
             rows = connection.execute(
                 """
@@ -587,7 +598,7 @@ class Database:
         else:
             bucket_totals = {}
 
-        connection.execute("DELETE FROM energy_buckets WHERE source = ?", (source,))
+        connection.execute("DELETE FROM energy_buckets WHERE source IN (?, ?)", (source, f"{source}_offpeak"))
         if bucket_totals:
             connection.executemany(
                 """
@@ -595,7 +606,12 @@ class Database:
                 VALUES (?, ?, ?, ?)
                 """,
                 [
-                    (source, granularity, bucket_key, energy_kwh)
+                    (
+                        "ble_offpeak" if source == "ble" and granularity.endswith(":offpeak") else source,
+                        granularity.split(":", 1)[0],
+                        bucket_key,
+                        energy_kwh,
+                    )
                     for granularity, bucket_map in bucket_totals.items()
                     for bucket_key, energy_kwh in bucket_map.items()
                 ],
@@ -634,15 +650,27 @@ class Database:
 
         return points
 
-    def _build_bucket_totals_from_rows(self, rows: list[sqlite3.Row | dict[str, Any]]) -> dict[str, dict[str, float]]:
+    def _build_bucket_totals_from_rows(
+        self,
+        rows: list[sqlite3.Row | dict[str, Any]],
+        *,
+        split_offpeak: bool = False,
+    ) -> dict[str, dict[str, float]]:
         bucket_totals: dict[str, dict[str, float]] = {"hour": {}, "day": {}, "week": {}, "month": {}}
+        if split_offpeak:
+            bucket_totals.update({"hour:offpeak": {}, "day:offpeak": {}, "week:offpeak": {}, "month:offpeak": {}})
         for index in range(1, len(rows)):
             previous_row = rows[index - 1]
             current_row = rows[index]
             previous_observed_at = self._parse_api_datetime(previous_row["observed_at"])
             current_observed_at = self._parse_api_datetime(current_row["observed_at"])
             average_rate = (float(previous_row["value"]) + float(current_row["value"])) / 2.0
-            for granularity, segments in self._build_bucket_segments(previous_observed_at, current_observed_at, average_rate).items():
+            for granularity, segments in self._build_bucket_segments(
+                previous_observed_at,
+                current_observed_at,
+                average_rate,
+                split_offpeak=split_offpeak,
+            ).items():
                 target = bucket_totals[granularity]
                 for bucket_key, energy_kwh in segments.items():
                     target[bucket_key] = target.get(bucket_key, 0.0) + energy_kwh
@@ -734,7 +762,12 @@ class Database:
         end: datetime,
         average_rate_w_per_min: float,
     ) -> None:
-        for granularity, bucket_map in self._build_bucket_segments(start, end, average_rate_w_per_min).items():
+        for granularity, bucket_map in self._build_bucket_segments(
+            start,
+            end,
+            average_rate_w_per_min,
+            split_offpeak=(source == "ble"),
+        ).items():
             for bucket_key, energy_kwh in bucket_map.items():
                 connection.execute(
                     """
@@ -743,7 +776,12 @@ class Database:
                     ON CONFLICT(source, granularity, bucket_key)
                     DO UPDATE SET energy_kwh = energy_buckets.energy_kwh + excluded.energy_kwh
                     """,
-                    (source, granularity, bucket_key, energy_kwh),
+                    (
+                        "ble_offpeak" if source == "ble" and granularity.endswith(":offpeak") else source,
+                        granularity.split(":", 1)[0],
+                        bucket_key,
+                        energy_kwh,
+                    ),
                 )
 
     def _build_bucket_segments(
@@ -751,12 +789,25 @@ class Database:
         start: datetime,
         end: datetime,
         average_rate_w_per_min: float,
+        *,
+        split_offpeak: bool = False,
     ) -> dict[str, dict[str, float]]:
+        if not split_offpeak:
+            return {
+                "hour": self._split_energy_across_buckets(start, end, average_rate_w_per_min, "hour"),
+                "day": self._split_energy_across_buckets(start, end, average_rate_w_per_min, "day"),
+                "week": self._split_energy_across_buckets(start, end, average_rate_w_per_min, "week"),
+                "month": self._split_energy_across_buckets(start, end, average_rate_w_per_min, "month"),
+            }
         return {
-            "hour": self._split_energy_across_buckets(start, end, average_rate_w_per_min, "hour"),
-            "day": self._split_energy_across_buckets(start, end, average_rate_w_per_min, "day"),
-            "week": self._split_energy_across_buckets(start, end, average_rate_w_per_min, "week"),
-            "month": self._split_energy_across_buckets(start, end, average_rate_w_per_min, "month"),
+            "hour": self._split_energy_across_buckets(start, end, average_rate_w_per_min, "hour", offpeak_mode="peak"),
+            "day": self._split_energy_across_buckets(start, end, average_rate_w_per_min, "day", offpeak_mode="peak"),
+            "week": self._split_energy_across_buckets(start, end, average_rate_w_per_min, "week", offpeak_mode="peak"),
+            "month": self._split_energy_across_buckets(start, end, average_rate_w_per_min, "month", offpeak_mode="peak"),
+            "hour:offpeak": self._split_energy_across_buckets(start, end, average_rate_w_per_min, "hour", offpeak_mode="offpeak"),
+            "day:offpeak": self._split_energy_across_buckets(start, end, average_rate_w_per_min, "day", offpeak_mode="offpeak"),
+            "week:offpeak": self._split_energy_across_buckets(start, end, average_rate_w_per_min, "week", offpeak_mode="offpeak"),
+            "month:offpeak": self._split_energy_across_buckets(start, end, average_rate_w_per_min, "month", offpeak_mode="offpeak"),
         }
 
     def _split_energy_across_days(
@@ -793,6 +844,7 @@ class Database:
         end: datetime,
         average_rate_w_per_min: float,
         granularity: str,
+        offpeak_mode: str = "all",
     ) -> dict[str, float]:
         if end <= start:
             return {}
@@ -804,9 +856,15 @@ class Database:
         while cursor < end_local:
             bucket_key = self._bucket_key_for_local_datetime(cursor, granularity)
             next_boundary = self._next_bucket_boundary(cursor, granularity)
-            segment_end = next_boundary if next_boundary < end_local else end_local
+            offpeak_boundary = self._next_offpeak_boundary(cursor)
+            segment_end = min(next_boundary, offpeak_boundary, end_local)
             delta_minutes = (segment_end - cursor).total_seconds() / 60.0
-            if delta_minutes > 0:
+            include_segment = (
+                offpeak_mode == "all"
+                or (offpeak_mode == "offpeak" and self._is_offpeak(cursor))
+                or (offpeak_mode == "peak" and not self._is_offpeak(cursor))
+            )
+            if delta_minutes > 0 and include_segment:
                 segments[bucket_key] = segments.get(bucket_key, 0.0) + (float(average_rate_w_per_min) * delta_minutes) / 1000.0
             cursor = segment_end
 
@@ -853,6 +911,17 @@ class Database:
             return month_anchor.replace(month=month_anchor.month + 1)
         raise ValueError(f"Unsupported granularity: {granularity}")
 
+    @staticmethod
+    def _is_offpeak(observed_at: datetime) -> bool:
+        return 0 <= observed_at.hour < 6
+
+    def _next_offpeak_boundary(self, observed_at: datetime) -> datetime:
+        day_start = observed_at.replace(hour=0, minute=0, second=0, microsecond=0)
+        offpeak_end = day_start + timedelta(hours=6)
+        if observed_at < offpeak_end:
+            return offpeak_end
+        return day_start + timedelta(days=1)
+
     def _recent_hour_bucket_keys(self, count: int) -> list[str]:
         now_local = datetime.now(self._timezone).replace(minute=0, second=0, microsecond=0)
         return [(now_local - timedelta(hours=offset)).strftime("%Y-%m-%d %H:00") for offset in range(count - 1, -1, -1)]
@@ -884,10 +953,11 @@ class Database:
             (granularity, *bucket_keys),
         ).fetchall() if bucket_keys else []
 
-        source_map = {"local_site": "solar", "ble": "grid", "byd_ev": "ev"}
+        source_map = {"local_site": "solar", "ble": "grid", "ble_offpeak": "offpeak", "byd_ev": "ev"}
         result = {
             "solar": {bucket_key: 0.0 for bucket_key in bucket_keys},
             "grid": {bucket_key: 0.0 for bucket_key in bucket_keys},
+            "offpeak": {bucket_key: 0.0 for bucket_key in bucket_keys},
             "ev": {bucket_key: 0.0 for bucket_key in bucket_keys},
         }
         for row in rows:
@@ -906,13 +976,13 @@ class Database:
             """,
             (granularity, bucket_key),
         ).fetchall()
-        totals = {"solar": 0.0, "grid": 0.0, "ev": 0.0}
-        source_map = {"local_site": "solar", "ble": "grid", "byd_ev": "ev"}
+        totals = {"solar": 0.0, "grid": 0.0, "offpeak": 0.0, "ev": 0.0}
+        source_map = {"local_site": "solar", "ble": "grid", "ble_offpeak": "offpeak", "byd_ev": "ev"}
         for row in rows:
             target = source_map.get(row["source"])
             if target:
                 totals[target] = float(row["energy_kwh"] or 0.0)
-        totals["net"] = totals["solar"] - totals["grid"]
+        totals["net"] = totals["solar"] - totals["grid"] - totals["offpeak"]
         return totals
 
     @staticmethod
