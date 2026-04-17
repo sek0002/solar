@@ -395,7 +395,7 @@ body {
   height: 24px;
 }
 
-.charger-toggle input {
+.charger-toggle-group input {
   position: absolute;
   inset: 0;
   opacity: 0;
@@ -425,19 +425,19 @@ body {
   transition: transform 0.18s ease;
 }
 
-.charger-toggle input:checked + .charger-toggle-track {
+.charger-toggle-group input:checked + .charger-toggle-track {
   background: #22c55e;
 }
 
-.charger-toggle input:checked + .charger-toggle-track::after {
+.charger-toggle-group input:checked + .charger-toggle-track::after {
   transform: translateX(18px);
 }
 
-.charger-toggle input:disabled {
+.charger-toggle-group input:disabled {
   cursor: wait;
 }
 
-.charger-toggle input:disabled + .charger-toggle-track {
+.charger-toggle-group input:disabled + .charger-toggle-track {
   opacity: 0.7;
 }
 
