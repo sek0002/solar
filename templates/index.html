@@ -72,6 +72,13 @@
             </div>
             <div class="topbar-gauge-inner-ticks"></div>
           </div>
+          <label id="charger-toggle-wrap" class="charger-toggle charger-toggle-topbar" {% if not tuya_control_enabled %}hidden{% endif %}>
+            <span class="charger-toggle-icon" aria-hidden="true">&#9889;</span>
+            <span class="charger-toggle-control">
+              <input id="charger-toggle" type="checkbox" aria-label="Start or stop charger">
+              <span class="charger-toggle-track"></span>
+            </span>
+          </label>
         </div>
         <button id="reset-range" class="theme-toggle" type="button" aria-label="Reset start time">
           Reset
@@ -85,13 +92,6 @@
         <span id="last-refresh" class="last-refresh status-refresh">Loading...</span>
         <div class="status-lower">
           <div class="battery-inline">
-            <label id="charger-toggle-wrap" class="charger-toggle" {% if not tuya_control_enabled %}hidden{% endif %}>
-              <span class="charger-toggle-label">Charger</span>
-              <span class="charger-toggle-control">
-                <input id="charger-toggle" type="checkbox" aria-label="Start or stop charger">
-                <span class="charger-toggle-track"></span>
-              </span>
-            </label>
             <div class="ev-battery-meter" aria-label="BLE battery level">
               <div id="ble-battery-fill" class="ble-battery-fill"></div>
             </div>
