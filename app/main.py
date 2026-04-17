@@ -53,6 +53,13 @@ async def _tuya_get_status_map(client: httpx.AsyncClient) -> dict[str, object]:
     return _tuya_status_map(await tuya_client.get_device_status(client))
 
 
+async def _tuya_status_snapshot() -> dict[str, object] | None:
+    if not settings.tuya_access_id or not settings.tuya_access_secret or not settings.tuya_device_id:
+        return None
+    async with httpx.AsyncClient(timeout=settings.tuya_timeout_seconds) as client:
+        return await _tuya_get_status_map(client)
+
+
 async def _tuya_wait_for_state(
     client: httpx.AsyncClient,
     *,
@@ -697,9 +704,15 @@ async def api_samples(
 
 @app.get("/api/status")
 async def api_status() -> dict[str, object]:
+    tuya_device_status = None
+    try:
+        tuya_device_status = await _tuya_status_snapshot()
+    except Exception:
+        logging.exception("Unable to fetch Tuya device status for dashboard refresh")
     return {
         "pollers": _with_network_ble_placeholder(await coordinator.statuses.snapshot()),
         "latest_samples": database.get_latest_samples(),
+        "tuya_device_status": tuya_device_status,
     }
 
 

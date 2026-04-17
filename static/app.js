@@ -432,9 +432,16 @@ function renderBydTopbarGauge(samples, pollers) {
   }
 }
 
-function getTuyaSwitchState(samples) {
+function getTuyaSwitchState(samples, directStatus = null) {
   if (chargerStateOverride) {
     return chargerStateOverride;
+  }
+  if (directStatus && typeof directStatus === "object") {
+    return {
+      enabled: typeof directStatus.switch === "boolean" ? directStatus.switch : null,
+      workState: typeof directStatus.work_state === "string" ? directStatus.work_state : null,
+      current: Number.isFinite(Number(directStatus.charge_cur_set)) ? Number(directStatus.charge_cur_set) : null
+    };
   }
   const tuyaSample = (samples || []).find((item) => item.source === "tuya_ev");
   const statusCodes = tuyaSample && tuyaSample.raw_payload && Array.isArray(tuyaSample.raw_payload.status_codes)
@@ -503,7 +510,7 @@ function getChargerStatusLabel(chargerState, isEnabled) {
   return "Charger n/a";
 }
 
-function renderChargerToggle(samples) {
+function renderChargerToggle(samples, directStatus = null) {
   if (!chargerToggle || !chargerToggleWrap) {
     return;
   }
@@ -518,7 +525,7 @@ function renderChargerToggle(samples) {
   if (chargerCurrentWrap) {
     chargerCurrentWrap.hidden = false;
   }
-  const chargerState = getTuyaSwitchState(samples);
+  const chargerState = getTuyaSwitchState(samples, directStatus);
   const isEnabled = getChargerEnabledState(chargerState);
   chargerToggle.checked = isEnabled === true;
   chargerToggle.disabled = chargerCommandInFlight;
@@ -1951,6 +1958,12 @@ function isCachedRefreshUsable(cachedPayload, request) {
 }
 
 function renderDashboardState(statusPayload, items, cumulativeSeries, energySummary, windowState, refreshLabel) {
+  const directChargerStatus = statusPayload && typeof statusPayload.tuya_device_status === "object"
+    ? statusPayload.tuya_device_status
+    : null;
+  if (!chargerCommandInFlight) {
+    setChargerStateOverrideFromDeviceStatus(directChargerStatus);
+  }
   renderStatusCards(statusPayload.pollers);
   renderCollectorStrip(statusPayload.pollers);
   latestValues.innerHTML = statusPayload.latest_samples
@@ -1959,7 +1972,7 @@ function renderDashboardState(statusPayload, items, cumulativeSeries, energySumm
     .join("");
   renderTopbarGauge(statusPayload.latest_samples);
   renderBydTopbarGauge(statusPayload.latest_samples, statusPayload.pollers);
-  renderChargerToggle(statusPayload.latest_samples);
+  renderChargerToggle(statusPayload.latest_samples, directChargerStatus);
   renderBleBatteryState(statusPayload.pollers);
   renderEvBatteryState(statusPayload.latest_samples, statusPayload.pollers);
 
@@ -2073,7 +2086,7 @@ async function refresh() {
     renderCollectorStrip([]);
     renderTopbarGauge([]);
     renderBydTopbarGauge([], []);
-    renderChargerToggle([]);
+    renderChargerToggle([], null);
     renderBleBatteryState([]);
     renderEvBatteryState([], []);
   }
@@ -2178,7 +2191,7 @@ if (chargerToggle) {
       current: previousOverride && previousOverride.current !== undefined ? previousOverride.current : null
     };
     setChargerControlsBusy(true);
-    renderChargerToggle([]);
+    renderChargerToggle([], null);
     try {
       const response = await fetch("/api/tuya/charger", {
         method: "POST",
@@ -2190,7 +2203,7 @@ if (chargerToggle) {
       }
       const payload = await response.json();
       setChargerStateOverrideFromDeviceStatus(payload.device_status);
-      renderChargerToggle([]);
+      renderChargerToggle([], null);
       scheduleRefresh(250);
     } catch (error) {
       console.error("Unable to update charger state", error);
@@ -2199,7 +2212,7 @@ if (chargerToggle) {
     } finally {
       chargerPendingMessage = "";
       setChargerControlsBusy(false);
-      renderChargerToggle([]);
+      renderChargerToggle([], null);
     }
   });
 }
@@ -2217,7 +2230,7 @@ chargerCurrentOptions.forEach((button) => {
       current,
     };
     setChargerControlsBusy(true);
-    renderChargerToggle([]);
+    renderChargerToggle([], null);
     try {
       const response = await fetch("/api/tuya/charger/current", {
         method: "POST",
@@ -2229,7 +2242,7 @@ chargerCurrentOptions.forEach((button) => {
       }
       const payload = await response.json();
       setChargerStateOverrideFromDeviceStatus(payload.device_status);
-      renderChargerToggle([]);
+      renderChargerToggle([], null);
       scheduleRefresh(250);
     } catch (error) {
       console.error("Unable to update charger current", error);
@@ -2237,7 +2250,7 @@ chargerCurrentOptions.forEach((button) => {
     } finally {
       chargerPendingMessage = "";
       setChargerControlsBusy(false);
-      renderChargerToggle([]);
+      renderChargerToggle([], null);
     }
   });
 });
