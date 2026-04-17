@@ -855,10 +855,10 @@ class TuyaCloudClient:
         self._access_token: Optional[str] = None
         self._token_expires_at = 0.0
 
-    def _build_headers(self, method: str, path: str, access_token: str = "") -> dict[str, str]:
+    def _build_headers(self, method: str, path: str, access_token: str = "", body: bytes = b"") -> dict[str, str]:
         timestamp = str(int(datetime.now(timezone.utc).timestamp() * 1000))
         nonce = uuid.uuid4().hex
-        content_sha256 = hashlib.sha256(b"").hexdigest()
+        content_sha256 = hashlib.sha256(body).hexdigest()
         string_to_sign = "{method}\n{content_sha}\n\n{path}".format(
             method=method.upper(),
             content_sha=content_sha256,
@@ -931,6 +931,27 @@ class TuyaCloudClient:
         if not isinstance(result, list):
             raise RuntimeError("Unexpected Tuya status payload shape")
         return result
+
+    async def send_device_commands(self, client: httpx.AsyncClient, commands: list[dict[str, Any]]) -> dict[str, Any]:
+        token = await self.get_access_token(client)
+        path = "/v1.0/devices/{device_id}/commands".format(device_id=self.settings.tuya_device_id)
+        body = json.dumps({"commands": commands}, separators=(",", ":")).encode()
+        response = await client.post(
+            "{base}{path}".format(base=self.settings.tuya_base_url, path=path),
+            headers={
+                **self._build_headers("POST", path, token, body),
+                "Content-Type": "application/json",
+            },
+            content=body,
+        )
+        response.raise_for_status()
+        payload = response.json()
+        if not payload.get("success"):
+            raise RuntimeError("Tuya command request failed: {code} {msg}".format(
+                code=payload.get("code"),
+                msg=payload.get("msg"),
+            ))
+        return payload
 
 
 class TuyaEvPoller:

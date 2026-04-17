@@ -16,7 +16,7 @@ from fastapi.templating import Jinja2Templates
 
 from app.config import settings
 from app.database import Database
-from app.pollers import PollingCoordinator
+from app.pollers import PollingCoordinator, TuyaCloudClient
 
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -25,6 +25,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 database = Database(settings.database_path, settings.timezone_name)
 coordinator = PollingCoordinator(settings, database)
+tuya_client = TuyaCloudClient(settings)
 
 
 def _static_asset_version(path: str) -> str:
@@ -609,6 +610,7 @@ async def index(request: Request) -> HTMLResponse:
             "manifest_version": _static_asset_version("static/manifest.webmanifest"),
             "styles_version": _static_asset_version("static/styles.css"),
             "sw_version": _static_asset_version("static/sw.js"),
+            "tuya_control_enabled": bool(settings.tuya_access_id and settings.tuya_access_secret and settings.tuya_device_id),
             "latest_samples": latest_samples,
             "statuses": statuses,
             "byd_map_embed_url": byd_map_embed_url,
@@ -663,6 +665,23 @@ async def api_cumulative() -> dict[str, object]:
 @app.get("/api/energy-summary")
 async def api_energy_summary() -> dict[str, object]:
     return database.get_energy_summary()
+
+
+@app.post("/api/tuya/charger")
+async def api_tuya_charger(payload: dict[str, object]) -> dict[str, object]:
+    if not settings.tuya_access_id or not settings.tuya_access_secret or not settings.tuya_device_id:
+        raise HTTPException(status_code=503, detail="Tuya charger control is not configured")
+
+    enabled = payload.get("enabled")
+    if not isinstance(enabled, bool):
+        raise HTTPException(status_code=400, detail="Expected boolean 'enabled' field")
+
+    async with httpx.AsyncClient(timeout=settings.tuya_timeout_seconds) as client:
+        result = await tuya_client.send_device_commands(
+            client,
+            [{"code": "switch", "value": enabled}],
+        )
+    return {"status": "ok", "enabled": enabled, "result": result.get("result")}
 
 
 def _check_ingest_token(token: Optional[str]) -> None:

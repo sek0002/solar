@@ -12,6 +12,8 @@ const batteryText = document.querySelector("#powerpal-battery");
 const bleBatteryFill = document.querySelector("#ble-battery-fill");
 const evBatteryFill = document.querySelector("#ev-battery-fill");
 const evBatteryLabel = document.querySelector("#ev-battery-label");
+const chargerToggle = document.querySelector("#charger-toggle");
+const chargerToggleWrap = document.querySelector("#charger-toggle-wrap");
 const topbarGauge = document.querySelector("#topbar-gauge");
 const topbarSolarValue = document.querySelector("#topbar-solar-value");
 const topbarBleValue = document.querySelector("#topbar-ble-value");
@@ -25,6 +27,7 @@ const hourlyChartElement = document.querySelector("#hourly-chart");
 const dailyChartElement = document.querySelector("#daily-chart");
 const weeklyChartElement = document.querySelector("#weekly-chart");
 const appTimezone = window.SOLAR_MONITOR_CONFIG.timezoneName || "Australia/Melbourne";
+const tuyaControlEnabled = Boolean(window.SOLAR_MONITOR_CONFIG.tuyaControlEnabled);
 const uiStateKey = "solar-monitor-ui-state";
 const appCacheVersionKey = "solar-monitor-cache-version";
 const refreshCacheKey = "solar-monitor-last-refresh";
@@ -411,6 +414,28 @@ function renderBydTopbarGauge(samples, pollers) {
   if (topbarBydSubvalue) {
     topbarBydSubvalue.textContent = socPercent === null ? "SoC n/a" : `SoC ${socPercent.toFixed(0)}%`;
   }
+}
+
+function getTuyaSwitchState(samples) {
+  const tuyaSample = (samples || []).find((item) => item.source === "tuya_ev");
+  const statusCodes = tuyaSample && tuyaSample.raw_payload && Array.isArray(tuyaSample.raw_payload.status_codes)
+    ? tuyaSample.raw_payload.status_codes
+    : [];
+  const switchItem = statusCodes.find((item) => item && item.code === "switch");
+  return switchItem && typeof switchItem.value === "boolean" ? switchItem.value : null;
+}
+
+function renderChargerToggle(samples) {
+  if (!chargerToggle || !chargerToggleWrap) {
+    return;
+  }
+  if (!tuyaControlEnabled) {
+    chargerToggleWrap.hidden = true;
+    return;
+  }
+  chargerToggleWrap.hidden = false;
+  const switchState = getTuyaSwitchState(samples);
+  chargerToggle.checked = switchState === true;
 }
 
 function getDayKey(dateLike) {
@@ -1836,6 +1861,7 @@ function renderDashboardState(statusPayload, items, cumulativeSeries, energySumm
     .join("");
   renderTopbarGauge(statusPayload.latest_samples);
   renderBydTopbarGauge(statusPayload.latest_samples, statusPayload.pollers);
+  renderChargerToggle(statusPayload.latest_samples);
   renderBleBatteryState(statusPayload.pollers);
   renderEvBatteryState(statusPayload.latest_samples, statusPayload.pollers);
 
@@ -1949,6 +1975,7 @@ async function refresh() {
     renderCollectorStrip([]);
     renderTopbarGauge([]);
     renderBydTopbarGauge([], []);
+    renderChargerToggle([]);
     renderBleBatteryState([]);
     renderEvBatteryState([], []);
   }
@@ -2040,6 +2067,30 @@ resetRangeButton.addEventListener("click", () => {
   resetStoredChartState();
   scheduleRefresh(0);
 });
+
+if (chargerToggle) {
+  chargerToggle.addEventListener("change", async () => {
+    const desiredState = chargerToggle.checked;
+    const previousDisabled = chargerToggle.disabled;
+    chargerToggle.disabled = true;
+    try {
+      const response = await fetch("/api/tuya/charger", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled: desiredState })
+      });
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+      scheduleRefresh(250);
+    } catch (error) {
+      console.error("Unable to update charger state", error);
+      chargerToggle.checked = !desiredState;
+    } finally {
+      chargerToggle.disabled = previousDisabled;
+    }
+  });
+}
 
 window.addEventListener("resize", resizeCharts);
 if ("serviceWorker" in navigator) {

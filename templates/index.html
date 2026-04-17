@@ -85,6 +85,13 @@
         <span id="last-refresh" class="last-refresh status-refresh">Loading...</span>
         <div class="status-lower">
           <div class="battery-inline">
+            <label id="charger-toggle-wrap" class="charger-toggle" {% if not tuya_control_enabled %}hidden{% endif %}>
+              <span class="charger-toggle-label">Charger</span>
+              <span class="charger-toggle-control">
+                <input id="charger-toggle" type="checkbox" aria-label="Start or stop charger">
+                <span class="charger-toggle-track"></span>
+              </span>
+            </label>
             <div class="ev-battery-meter" aria-label="BLE battery level">
               <div id="ble-battery-fill" class="ble-battery-fill"></div>
             </div>
@@ -250,7 +257,8 @@
   <script>
     window.SOLAR_MONITOR_CONFIG = {
       defaultHours: {{ default_hours }},
-      timezoneName: {{ timezone_name|tojson }}
+      timezoneName: {{ timezone_name|tojson }},
+      tuyaControlEnabled: {{ tuya_control_enabled|tojson }}
     };
   </script>
   <script>

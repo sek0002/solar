@@ -296,6 +296,77 @@ body {
   min-width: 120px;
 }
 
+.charger-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+}
+
+.charger-toggle-label {
+  font-size: 0.84rem;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.charger-toggle-control {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  width: 42px;
+  height: 24px;
+}
+
+.charger-toggle input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  margin: 0;
+  cursor: pointer;
+  z-index: 2;
+}
+
+.charger-toggle-track {
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--muted) 35%, transparent);
+  transition: background 0.18s ease;
+}
+
+.charger-toggle-track::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  background: #ffffff;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.18);
+  transition: transform 0.18s ease;
+}
+
+.charger-toggle input:checked + .charger-toggle-track {
+  background: #22c55e;
+}
+
+.charger-toggle input:checked + .charger-toggle-track::after {
+  transform: translateX(18px);
+}
+
+.charger-toggle input:disabled {
+  cursor: wait;
+}
+
+.charger-toggle input:disabled + .charger-toggle-track {
+  opacity: 0.7;
+}
+
 .ev-battery-meter {
   width: 120px;
   height: 6px;
