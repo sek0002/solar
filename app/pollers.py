@@ -1096,6 +1096,7 @@ class TuyaSolarChargingAutomation:
         self._client = TuyaCloudClient(settings)
         self._timezone = pytz.timezone(settings.timezone_name)
         self._ble_guard_hold_until: Optional[datetime] = None
+        self._offpeak_was_active = False
 
     async def run(self) -> None:
         await self.statuses.update(
@@ -1164,15 +1165,31 @@ class TuyaSolarChargingAutomation:
     def _evaluate_target(self) -> dict[str, Any]:
         now_utc = datetime.now(timezone.utc)
         now_local = now_utc.astimezone(self._timezone)
+        if self._is_offpeak_charge_window(now_local):
+            self._offpeak_was_active = True
+            self._ble_guard_hold_until = None
+            return {
+                "mode": "target",
+                "reason": "Off-peak schedule active",
+                "target_enabled": True,
+                "target_current": 13,
+                "offpeak_active": True,
+                "local_time": now_local.isoformat(),
+            }
+        if self._offpeak_was_active:
+            self._offpeak_was_active = False
+            self._ble_guard_hold_until = None
+            return {
+                "mode": "target",
+                "reason": "Off-peak schedule ended",
+                "target_enabled": False,
+                "target_current": None,
+                "offpeak_ended": True,
+                "local_time": now_local.isoformat(),
+            }
         ble_guard = self._evaluate_ble_guard(now_utc)
         if ble_guard is not None:
             return ble_guard
-        if 0 <= now_local.hour < 6:
-            return {
-                "mode": "offpeak",
-                "reason": "Automation paused during off-peak window",
-                "local_time": now_local.isoformat(),
-            }
 
         window_minutes = max(1.0, float(self.settings.tuya_solar_automation_window_minutes))
         since = now_utc - timedelta(minutes=window_minutes)
@@ -1435,6 +1452,18 @@ class TuyaSolarChargingAutomation:
         if parsed.tzinfo is None:
             parsed = parsed.replace(tzinfo=timezone.utc)
         return parsed
+
+    def _is_offpeak_charge_window(self, now_local: datetime) -> bool:
+        if not self.settings.tuya_offpeak_charge_enabled:
+            return False
+        start_hour = max(0, min(23, int(self.settings.tuya_offpeak_start_hour)))
+        end_hour = max(0, min(23, int(self.settings.tuya_offpeak_end_hour)))
+        current_hour = now_local.hour
+        if start_hour == end_hour:
+            return True
+        if start_hour < end_hour:
+            return start_hour <= current_hour < end_hour
+        return current_hour >= start_hour or current_hour < end_hour
 
 
 

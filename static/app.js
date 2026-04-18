@@ -580,6 +580,12 @@ function getAutomationStatusLabel(statusPayload, isEnabled) {
   if (!details) {
     return "Auto on";
   }
+  if (details.offpeak_active) {
+    return "Off-peak on";
+  }
+  if (details.offpeak_ended) {
+    return "Off-peak off";
+  }
   if (details.ble_guard_active) {
     return "Grid hold";
   }
