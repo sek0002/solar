@@ -1,6 +1,5 @@
-const CACHE_NAME = "solar-monitor-v1";
+const CACHE_NAME = "solar-monitor-v2";
 const APP_SHELL = [
-  "/",
   "/static/styles.css",
   "/static/app.js",
   "/static/icons/icon-192.png",
@@ -39,6 +38,21 @@ self.addEventListener("fetch", (event) => {
 
   if (url.pathname.startsWith("/api/")) {
     event.respondWith(fetch(request));
+    return;
+  }
+
+  if (request.mode === "navigate" || request.destination === "document") {
+    event.respondWith(
+      fetch(request)
+        .then((response) => {
+          if (response && response.status === 200) {
+            const copy = response.clone();
+            caches.open(CACHE_NAME).then((cache) => cache.put(request, copy));
+          }
+          return response;
+        })
+        .catch(() => caches.match(request))
+    );
     return;
   }
 
