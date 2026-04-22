@@ -39,14 +39,16 @@ AUTH_ATTEMPTS: dict[str, list[float]] = {}
 def _validate_auth_settings() -> None:
     if not settings.app_auth_enabled:
         return
+    required_settings = {
+        "APP_AUTH_USERNAME": settings.app_auth_username,
+        "APP_AUTH_TOTP_SECRET": settings.app_auth_totp_secret,
+        "APP_AUTH_SESSION_SECRET": settings.app_auth_session_secret,
+    }
+    if not settings.app_auth_otp_only:
+        required_settings["APP_AUTH_PASSWORD_HASH"] = settings.app_auth_password_hash
     missing = [
         name
-        for name, value in {
-            "APP_AUTH_USERNAME": settings.app_auth_username,
-            "APP_AUTH_PASSWORD_HASH": settings.app_auth_password_hash,
-            "APP_AUTH_TOTP_SECRET": settings.app_auth_totp_secret,
-            "APP_AUTH_SESSION_SECRET": settings.app_auth_session_secret,
-        }.items()
+        for name, value in required_settings.items()
         if not str(value).strip()
     ]
     if missing:
@@ -199,6 +201,7 @@ def _render_auth_page(request: Request, *, step: str, error: str | None = None, 
             "step": step,
             "error": error,
             "next_path": next_path,
+            "otp_only": settings.app_auth_otp_only,
         },
     )
     _apply_security_headers(response)
@@ -819,17 +822,33 @@ async def auth_middleware(request: Request, call_next):
 async def login_page(request: Request, next: Optional[str] = Query(default="/")) -> HTMLResponse:
     if _verify_session_cookie(request):
         return RedirectResponse(url=_normalize_next_path(next), status_code=303)
-    return _render_auth_page(request, step="login", next_path=_normalize_next_path(next))
+    return _render_auth_page(request, step="otp" if settings.app_auth_otp_only else "login", next_path=_normalize_next_path(next))
 
 
 @app.post("/login", response_class=HTMLResponse)
 async def login_submit(request: Request) -> Response:
     next_path = _normalize_next_path(await _read_form_field(request, "next"))
-    username = await _read_form_field(request, "username")
-    password = await _read_form_field(request, "password")
     limit_key = _client_key(request, "login")
     if not _check_rate_limit(limit_key):
-        return _render_auth_page(request, step="login", error="Please wait and try again.", next_path=next_path)
+        return _render_auth_page(
+            request,
+            step="otp" if settings.app_auth_otp_only else "login",
+            error="Please wait and try again.",
+            next_path=next_path,
+        )
+    if settings.app_auth_otp_only:
+        code = await _read_form_field(request, "otp_code")
+        if not verify_totp(settings.app_auth_totp_secret, code):
+            _record_attempt(limit_key)
+            return _render_auth_page(request, step="otp", error="Invalid one-time code.", next_path=next_path)
+        _clear_attempts(limit_key)
+        response = RedirectResponse(url=next_path, status_code=303)
+        _set_cookie(response, AUTH_SESSION_COOKIE, _auth_token(settings.app_auth_session_secret), max_age=settings.app_auth_session_hours * 3600)
+        response.delete_cookie(AUTH_PENDING_COOKIE, path="/")
+        return response
+
+    username = await _read_form_field(request, "username")
+    password = await _read_form_field(request, "password")
     if username != settings.app_auth_username or not verify_password(password, settings.app_auth_password_hash):
         _record_attempt(limit_key)
         return _render_auth_page(request, step="login", error="Invalid credentials.", next_path=next_path)
@@ -841,6 +860,8 @@ async def login_submit(request: Request) -> Response:
 
 @app.get("/otp", response_class=HTMLResponse)
 async def otp_page(request: Request) -> Response:
+    if settings.app_auth_otp_only:
+        return RedirectResponse(url="/login", status_code=303)
     if _verify_session_cookie(request):
         return RedirectResponse(url="/", status_code=303)
     pending = _verify_pending_cookie(request)
@@ -853,6 +874,8 @@ async def otp_page(request: Request) -> Response:
 
 @app.post("/otp", response_class=HTMLResponse)
 async def otp_submit(request: Request) -> Response:
+    if settings.app_auth_otp_only:
+        return RedirectResponse(url="/login", status_code=303)
     pending = _verify_pending_cookie(request)
     if not pending:
         response = RedirectResponse(url="/login", status_code=303)

@@ -39,6 +39,7 @@ class Settings:
     database_path: Path = Path(os.getenv("DATABASE_PATH", "data/solar_monitor.db"))
     timezone_name: str = os.getenv("TIMEZONE", "Australia/Melbourne")
     app_auth_enabled: bool = _env_bool("APP_AUTH_ENABLED", True)
+    app_auth_otp_only: bool = _env_bool("APP_AUTH_OTP_ONLY", False)
     app_auth_username: str = os.getenv("APP_AUTH_USERNAME", "")
     app_auth_password_hash: str = os.getenv("APP_AUTH_PASSWORD_HASH", "")
     app_auth_totp_secret: str = os.getenv("APP_AUTH_TOTP_SECRET", "")
