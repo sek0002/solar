@@ -51,13 +51,13 @@
             <a class="page-tab" href="/byd">BYD</a>
           </nav>
           <div class="topbar-gauges" aria-label="Live topbar gauges">
-            <div id="topbar-gauge" class="topbar-gauge" aria-label="Solar generation and Growatt gauge">
+            <div id="topbar-gauge" class="topbar-gauge" aria-label="Solar generation and BLE gauge">
               <div class="topbar-gauge-ble-ring"></div>
               <div class="topbar-gauge-solar-ring">
                 <div class="topbar-gauge-core">
                   <span class="topbar-gauge-label">Solar</span>
                   <strong id="topbar-solar-value" class="topbar-gauge-value">n/a</strong>
-                  <small id="topbar-ble-value" class="topbar-gauge-subvalue">Growatt n/a</small>
+                  <small id="topbar-ble-value" class="topbar-gauge-subvalue">BLE n/a</small>
                 </div>
               </div>
               <div class="topbar-gauge-inner-ticks"></div>
@@ -66,9 +66,9 @@
               <div class="topbar-gauge-byd-ring"></div>
               <div class="topbar-gauge-solar-ring topbar-gauge-byd-solar-ring">
                 <div class="topbar-gauge-core">
-                  <span class="topbar-gauge-label">Storage</span>
+                  <span class="topbar-gauge-label">EV</span>
                   <strong id="topbar-byd-value" class="topbar-gauge-value">n/a</strong>
-                  <small id="topbar-byd-subvalue" class="topbar-gauge-subvalue">Battery n/a</small>
+                  <small id="topbar-byd-subvalue" class="topbar-gauge-subvalue">SoC n/a</small>
                 </div>
               </div>
               <div class="topbar-gauge-inner-ticks"></div>
@@ -89,7 +89,7 @@
         <span id="last-refresh" class="last-refresh status-refresh">Loading...</span>
         <div class="status-lower">
           <div class="battery-inline">
-            <div class="ev-battery-meter" aria-label="Growatt battery level">
+            <div class="ev-battery-meter" aria-label="BLE battery level">
               <div id="ble-battery-fill" class="ble-battery-fill"></div>
             </div>
             <span id="powerpal-battery" class="last-refresh">Battery n/a</span>
@@ -135,12 +135,14 @@
       <div class="panel-header">
         <div>
           <h2>Live energy charts</h2>
+          <span>BLE, site solar, and BYD EV share one chart, with cumulative energy beside it.</span>
         </div>
       </div>
       <div class="charts-grid charts-grid-two charts-grid-nested">
         <section class="chart-panel-subsection">
           <div class="subchart-header">
-            <h3>Battery, Solar, Powerwall</h3>
+            <h3>BLE, site solar, and BYD EV</h3>
+            <span>BLE grid, site solar, and BYD EV power overlaid with kW/hr primary axis.</span>
           </div>
           <div id="ble-chart"></div>
         </section>
@@ -148,6 +150,7 @@
         <section class="chart-panel-subsection">
           <div class="subchart-header">
             <h3>Cumulative energy</h3>
+            <span>BLE grid and site solar daily cumulative totals.</span>
           </div>
           <div id="cumulative-chart"></div>
         </section>
@@ -158,14 +161,14 @@
       <div class="panel-header">
         <div>
           <h2>Energy Summary</h2>
-          <span>Cumulative solar, Growatt, and Powerwall energy by hour across the last day, by day across the last week, and by week across the last month.</span>
+          <span>Cumulative solar, BLE grid, and BYD EV energy by hour across the last day, by day across the last week, and by week across the last month.</span>
         </div>
       </div>
       <div class="charts-grid charts-grid-three">
         <section class="chart-panel-subsection">
           <div class="subchart-header">
             <h3>Hourly cumulative</h3>
-            <span>Solar, Growatt, and Powerwall energy each hour over the last 24 hours.</span>
+            <span>Solar, BLE grid, and BYD EV energy each hour over the last 24 hours.</span>
           </div>
           <div id="hourly-chart"></div>
         </section>
@@ -173,7 +176,7 @@
         <section class="chart-panel-subsection">
           <div class="subchart-header">
             <h3>Daily cumulative</h3>
-            <span>Solar, Growatt, and Powerwall energy each day over the last 7 days.</span>
+            <span>Solar, BLE grid, and BYD EV energy each day over the last 7 days.</span>
           </div>
           <div id="daily-chart"></div>
         </section>
@@ -181,73 +184,47 @@
         <section class="chart-panel-subsection">
           <div class="subchart-header">
             <h3>Weekly cumulative</h3>
-            <span>Solar, Growatt, and Powerwall energy each week over the last 30 days.</span>
+            <span>Solar, BLE grid, and BYD EV energy each week over the last 30 days.</span>
           </div>
           <div id="weekly-chart"></div>
         </section>
       </div>
     </section>
 
-    <section class="panel grouped-chart-panel tesla-vehicle-panel">
-      <div class="charts-grid charts-grid-two tesla-vehicle-grid">
-        <section class="chart-panel-subsection tesla-vehicle-subsection">
+    <section class="panel grouped-chart-panel byd-status-panel">
+      <div class="charts-grid charts-grid-two byd-status-grid">
+        <section class="chart-panel-subsection byd-status-subsection">
           <div class="subchart-header">
-            <h3>Tesla car 1</h3>
-            <span>Latest live status for the first configured Tesla VIN.</span>
+            <h3>BYD vehicle status</h3>
+            <span>Embedded from the standalone BYD page.</span>
           </div>
-          <div id="tesla-vehicle-card-1" class="tesla-vehicle-card-slot">
-            <article class="metric-card">
-              <span>tesla_vehicle_1</span>
-              <strong>Waiting for data</strong>
-              <small>Configure the first Tesla VIN to populate this card.</small>
-            </article>
-          </div>
+          <iframe
+            id="byd-summary-frame"
+            src="/byd?embed=1"
+            title="BYD vehicle status"
+            loading="lazy"
+            referrerpolicy="same-origin"
+          ></iframe>
         </section>
 
-        <section class="chart-panel-subsection tesla-vehicle-subsection">
+        <section class="chart-panel-subsection byd-status-subsection">
           <div class="subchart-header">
-            <h3>Tesla car 2</h3>
-            <span>Latest live status for the second configured Tesla VIN.</span>
+            <h3>BYD map location</h3>
+            <span>Latest GPS location from the stored BYD payload.</span>
           </div>
-          <div id="tesla-vehicle-card-2" class="tesla-vehicle-card-slot">
-            <article class="metric-card">
-              <span>tesla_vehicle_2</span>
-              <strong>Waiting for data</strong>
-              <small>Configure the second Tesla VIN to populate this card.</small>
-            </article>
-          </div>
+          {% if byd_map_embed_url %}
+          <iframe
+            id="byd-map-frame"
+            src="{{ byd_map_embed_url }}"
+            title="BYD map location"
+            loading="lazy"
+            referrerpolicy="no-referrer-when-downgrade"
+          ></iframe>
+          <div class="byd-map-caption">GPS {{ "%.5f"|format(byd_map_latitude) }}, {{ "%.5f"|format(byd_map_longitude) }}</div>
+          {% else %}
+          <div class="byd-map-empty">GPS location not available yet.</div>
+          {% endif %}
         </section>
-      </div>
-    </section>
-
-    <section class="panel">
-      <div class="panel-header">
-        <div>
-          <h2>Energy storage and Tesla fleet</h2>
-          <span>Growatt battery, Tesla Powerwall 3, and both Tesla vehicles in the existing solar layout.</span>
-        </div>
-      </div>
-      <div id="system-overview" class="system-overview-grid">
-        <article class="metric-card">
-          <span>growatt_battery</span>
-          <strong>Waiting for data</strong>
-          <small>Configure Growatt polling to populate this card.</small>
-        </article>
-        <article class="metric-card">
-          <span>tesla_powerwall</span>
-          <strong>Waiting for data</strong>
-          <small>Configure Tesla energy polling to populate this card.</small>
-        </article>
-        <article class="metric-card">
-          <span>tesla_vehicle_1</span>
-          <strong>Waiting for data</strong>
-          <small>Configure the first Tesla VIN to populate this card.</small>
-        </article>
-        <article class="metric-card">
-          <span>tesla_vehicle_2</span>
-          <strong>Waiting for data</strong>
-          <small>Configure the second Tesla VIN to populate this card.</small>
-        </article>
       </div>
     </section>
 
@@ -260,7 +237,7 @@
           {% for status in statuses %}
           <details class="status-card" data-status-name="{{ status.name }}">
             <summary>
-              <strong>{% if status.name in ["ble", "network_ble"] %}Growatt{% else %}{{ status.name }}{% endif %}</strong>
+              <strong>{{ status.name }}</strong>
               <span>{{ status.state }}</span>
             </summary>
           </details>
@@ -272,7 +249,7 @@
         <div id="latest-values" class="latest-values">
           {% for sample in latest_samples %}
           <article class="metric-card">
-            <span>{% if sample.source in ["ble", "network_ble"] %}Growatt{% else %}{{ sample.source }}{% endif %}</span>
+            <span>{{ sample.source }}</span>
             <strong>{{ sample.grid_usage_watts or sample.solar_generation_watts or "n/a" }}</strong>
           </article>
           {% endfor %}

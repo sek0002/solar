@@ -714,8 +714,7 @@ input[type="range"] {
 
 .status-cards,
 .latest-values,
-.stats-grid,
-.system-overview-grid {
+.stats-grid {
   display: grid;
   gap: 14px;
 }
@@ -723,10 +722,6 @@ input[type="range"] {
 .latest-values {
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   margin-top: 10px;
-}
-
-.system-overview-grid {
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
 }
 
 .collector-latest-header {
@@ -912,26 +907,54 @@ input[type="range"] {
   background: color-mix(in srgb, var(--panel-strong) 92%, transparent);
 }
 
-.tesla-vehicle-subsection {
+#byd-summary-frame {
+  height: 270px;
+}
+
+.byd-status-subsection {
   display: grid;
   grid-template-rows: auto 1fr;
 }
 
-.tesla-vehicle-panel {
+.byd-status-panel {
   margin-top: 0;
 }
 
-.tesla-vehicle-grid {
+.byd-status-grid {
   align-items: stretch;
 }
 
-.tesla-vehicle-card-slot {
+#byd-summary-frame {
+  width: 100%;
   min-height: 320px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--panel);
 }
 
-.tesla-vehicle-card-slot .metric-card {
+#byd-map-frame {
+  width: 100%;
   min-height: 320px;
-  align-content: start;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--panel);
+}
+
+.byd-map-caption,
+.byd-map-empty {
+  color: var(--muted);
+  font-size: 0.84rem;
+}
+
+.byd-map-empty {
+  display: grid;
+  place-items: center;
+  min-height: 320px;
+  border: 1px dashed var(--line);
+  border-radius: 16px;
+  background: var(--panel);
+  text-align: center;
+  padding: 16px;
 }
 
 .metric-reading {

@@ -38,38 +38,6 @@ def watts_to_rate_per_minute(value: Optional[float]) -> Optional[float]:
     return float(value) / 60.0
 
 
-def _get_nested_value(payload: Any, path: str) -> Any:
-    if not path:
-        return None
-    current = payload
-    for part in path.split("."):
-        if isinstance(current, dict):
-            current = current.get(part)
-            continue
-        if isinstance(current, list):
-            try:
-                current = current[int(part)]
-            except (ValueError, IndexError):
-                return None
-            continue
-        return None
-    return current
-
-
-def _coerce_float(value: Any) -> Optional[float]:
-    if value in (None, ""):
-        return None
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return None
-
-
-def _coerce_int(value: Any) -> Optional[int]:
-    numeric = _coerce_float(value)
-    return int(numeric) if numeric is not None else None
-
-
 @dataclass
 class PollerStatus:
     name: str
@@ -1272,25 +1240,22 @@ class TuyaSolarChargingAutomation:
         min_solar = min(solar_values)
         max_solar = max(solar_values)
         average_solar = sum(solar_values) / len(solar_values)
-        min_solar_kw = self._rate_per_minute_to_kw_per_hour(min_solar)
-        max_solar_kw = self._rate_per_minute_to_kw_per_hour(max_solar)
-        average_solar_kw = self._rate_per_minute_to_kw_per_hour(average_solar)
         target_current = None
         target_enabled = None
         reason = "No sustained threshold change"
-        if min_solar_kw >= float(self.settings.tuya_solar_automation_13a_watts):
+        if min_solar >= float(self.settings.tuya_solar_automation_13a_watts):
             target_enabled = True
             target_current = 13
             reason = "Sustained solar surplus for 13A"
-        elif min_solar_kw >= float(self.settings.tuya_solar_automation_10a_watts):
+        elif min_solar >= float(self.settings.tuya_solar_automation_10a_watts):
             target_enabled = True
             target_current = 10
             reason = "Sustained solar surplus for 10A"
-        elif min_solar_kw >= float(self.settings.tuya_solar_automation_6a_watts):
+        elif min_solar >= float(self.settings.tuya_solar_automation_6a_watts):
             target_enabled = True
             target_current = 6
             reason = "Sustained solar surplus for 6A"
-        elif max_solar_kw < float(self.settings.tuya_solar_automation_6a_watts):
+        elif max_solar < float(self.settings.tuya_solar_automation_6a_watts):
             target_enabled = False
             reason = "Sustained solar below charging threshold"
 
@@ -1304,9 +1269,6 @@ class TuyaSolarChargingAutomation:
             "min_solar_watts": round(min_solar, 1),
             "max_solar_watts": round(max_solar, 1),
             "average_solar_watts": round(average_solar, 1),
-            "min_solar_kw": round(min_solar_kw, 3),
-            "max_solar_kw": round(max_solar_kw, 3),
-            "average_solar_kw": round(average_solar_kw, 3),
             "target_enabled": target_enabled,
             "target_current": target_current,
             "latest_observed_at": str(local_site_samples[-1]["observed_at"]),
@@ -1356,11 +1318,8 @@ class TuyaSolarChargingAutomation:
         min_ble = min(ble_values)
         max_ble = max(ble_values)
         average_ble = sum(ble_values) / len(ble_values)
-        min_ble_kw = self._rate_per_minute_to_kw_per_hour(min_ble)
-        max_ble_kw = self._rate_per_minute_to_kw_per_hour(max_ble)
-        average_ble_kw = self._rate_per_minute_to_kw_per_hour(average_ble)
         guard_watts = float(self.settings.tuya_ble_guard_watts)
-        if min_ble_kw < guard_watts:
+        if min_ble < guard_watts:
             return None
 
         cooldown_minutes = max(1.0, float(self.settings.tuya_ble_guard_cooldown_minutes))
@@ -1381,9 +1340,6 @@ class TuyaSolarChargingAutomation:
             "min_ble_watts": round(min_ble, 1),
             "max_ble_watts": round(max_ble, 1),
             "average_ble_watts": round(average_ble, 1),
-            "min_ble_kw": round(min_ble_kw, 3),
-            "max_ble_kw": round(max_ble_kw, 3),
-            "average_ble_kw": round(average_ble_kw, 3),
             "latest_observed_at": str(ble_samples[-1]["observed_at"]),
         }
 
@@ -1509,10 +1465,6 @@ class TuyaSolarChargingAutomation:
             return start_hour <= current_hour < end_hour
         return current_hour >= start_hour or current_hour < end_hour
 
-    @staticmethod
-    def _rate_per_minute_to_kw_per_hour(value: float) -> float:
-        return (float(value) * 60.0) / 1000.0
-
 
 
 class BydEvPoller:
@@ -1637,337 +1589,6 @@ class BydEvPoller:
         return payload
 
 
-class GrowattBatteryPoller:
-    def __init__(self, settings: Settings, database: Database, statuses: StatusRegistry) -> None:
-        self.settings = settings
-        self.database = database
-        self.statuses = statuses
-        self._stopped = asyncio.Event()
-
-    async def run(self) -> None:
-        await self.statuses.update(
-            "growatt_battery",
-            state="starting",
-            details={"base_url": self.settings.growatt_base_url, "status_path": self.settings.growatt_status_path},
-        )
-        headers = {}
-        if self.settings.growatt_token:
-            headers[self.settings.growatt_header_name] = self.settings.growatt_token
-
-        async with httpx.AsyncClient(
-            timeout=self.settings.growatt_timeout_seconds,
-            headers=headers,
-        ) as client:
-            while not self._stopped.is_set():
-                try:
-                    payload = await self._fetch_payload(client)
-                    sample = self._parse_payload(payload)
-                    observed_at = datetime.now(timezone.utc)
-                    self.database.insert_sample(
-                        source="growatt_battery",
-                        observed_at=observed_at,
-                        grid_usage_watts=sample["battery_power_w_per_min"],
-                        solar_generation_watts=None,
-                        raw_payload=sample,
-                    )
-                    await self.statuses.update(
-                        "growatt_battery",
-                        state="connected",
-                        mark_success=True,
-                        details={
-                            "soc_percent": sample.get("soc_percent"),
-                            "power_watts": sample.get("power_watts"),
-                            "battery_status": sample.get("battery_status"),
-                            "temperature_c": sample.get("temperature_c"),
-                        },
-                    )
-                except Exception as exc:
-                    LOGGER.exception("Growatt battery poll failed")
-                    await self.statuses.update(
-                        "growatt_battery",
-                        state="error",
-                        error=str(exc),
-                        details={"base_url": self.settings.growatt_base_url, "status_path": self.settings.growatt_status_path},
-                    )
-                try:
-                    await asyncio.wait_for(self._stopped.wait(), timeout=self.settings.growatt_poll_seconds)
-                except asyncio.TimeoutError:
-                    continue
-
-    async def stop(self) -> None:
-        self._stopped.set()
-
-    async def _fetch_payload(self, client: httpx.AsyncClient) -> dict[str, Any]:
-        if not self.settings.growatt_base_url or not self.settings.growatt_status_path:
-            raise RuntimeError("Growatt is enabled but GROWATT_BASE_URL or GROWATT_STATUS_PATH is missing")
-        response = await client.get(f"{self.settings.growatt_base_url}{self.settings.growatt_status_path}")
-        response.raise_for_status()
-        payload = response.json()
-        if not isinstance(payload, dict):
-            raise RuntimeError("Growatt status response was not a JSON object")
-        return payload
-
-    def _parse_payload(self, payload: dict[str, Any]) -> dict[str, Any]:
-        soc_percent = _coerce_float(_get_nested_value(payload, self.settings.growatt_battery_soc_path))
-        power_watts = _coerce_float(_get_nested_value(payload, self.settings.growatt_battery_power_path))
-        temperature_c = _coerce_float(_get_nested_value(payload, self.settings.growatt_battery_temp_path))
-        capacity_kwh = _coerce_float(_get_nested_value(payload, self.settings.growatt_battery_capacity_path))
-        battery_status = _get_nested_value(payload, self.settings.growatt_battery_status_path)
-        return {
-            "soc_percent": soc_percent,
-            "power_watts": power_watts,
-            "battery_power_w_per_min": watts_to_rate_per_minute(abs(power_watts)) if power_watts is not None else None,
-            "temperature_c": temperature_c,
-            "capacity_kwh": capacity_kwh,
-            "battery_status": battery_status,
-            "source_kind": "growatt_cloud",
-            "status_payload": payload,
-        }
-
-
-class TeslaApiClient:
-    def __init__(self, settings: Settings) -> None:
-        self.settings = settings
-
-    def _headers(self) -> dict[str, str]:
-        return {
-            "Authorization": f"Bearer {self.settings.tesla_access_token}",
-            "Content-Type": "application/json",
-        }
-
-    async def get_products(self, client: httpx.AsyncClient) -> list[dict[str, Any]]:
-        response = await client.get(f"{self.settings.tesla_base_url}/api/1/products", headers=self._headers())
-        response.raise_for_status()
-        payload = response.json()
-        products = payload.get("response", payload)
-        return products if isinstance(products, list) else []
-
-    async def get_vehicle(self, client: httpx.AsyncClient, vin: str) -> dict[str, Any]:
-        response = await client.get(f"{self.settings.tesla_base_url}/api/1/vehicles/{vin}", headers=self._headers())
-        response.raise_for_status()
-        payload = response.json()
-        vehicle = payload.get("response", payload)
-        return vehicle if isinstance(vehicle, dict) else {}
-
-    async def get_vehicle_data(self, client: httpx.AsyncClient, vin: str) -> dict[str, Any]:
-        response = await client.get(f"{self.settings.tesla_base_url}/api/1/vehicles/{vin}/vehicle_data", headers=self._headers())
-        response.raise_for_status()
-        payload = response.json()
-        vehicle_data = payload.get("response", payload)
-        return vehicle_data if isinstance(vehicle_data, dict) else {}
-
-    async def get_energy_live_status(self, client: httpx.AsyncClient, site_id: str) -> dict[str, Any]:
-        response = await client.get(
-            f"{self.settings.tesla_base_url}/api/1/energy_sites/{site_id}/live_status",
-            headers=self._headers(),
-        )
-        response.raise_for_status()
-        payload = response.json()
-        live_status = payload.get("response", payload)
-        return live_status if isinstance(live_status, dict) else {}
-
-    async def get_energy_site_info(self, client: httpx.AsyncClient, site_id: str) -> dict[str, Any]:
-        response = await client.get(
-            f"{self.settings.tesla_base_url}/api/1/energy_sites/{site_id}/site_info",
-            headers=self._headers(),
-        )
-        response.raise_for_status()
-        payload = response.json()
-        site_info = payload.get("response", payload)
-        return site_info if isinstance(site_info, dict) else {}
-
-
-class TeslaEnergyPoller:
-    def __init__(self, settings: Settings, database: Database, statuses: StatusRegistry) -> None:
-        self.settings = settings
-        self.database = database
-        self.statuses = statuses
-        self.client = TeslaApiClient(settings)
-        self._stopped = asyncio.Event()
-
-    async def run(self) -> None:
-        await self.statuses.update(
-            "tesla_powerwall",
-            state="starting",
-            details={"energy_site_id": self.settings.tesla_energy_site_id},
-        )
-        async with httpx.AsyncClient(timeout=self.settings.tesla_timeout_seconds) as http_client:
-            while not self._stopped.is_set():
-                try:
-                    site_id = await self._resolve_site_id(http_client)
-                    live_status = await self.client.get_energy_live_status(http_client, site_id)
-                    site_info = await self.client.get_energy_site_info(http_client, site_id)
-                    sample = self._build_sample(site_id, live_status, site_info)
-                    observed_at = datetime.now(timezone.utc)
-                    self.database.insert_sample(
-                        source="tesla_powerwall",
-                        observed_at=observed_at,
-                        grid_usage_watts=sample["battery_power_w_per_min"],
-                        solar_generation_watts=None,
-                        raw_payload=sample,
-                    )
-                    await self.statuses.update(
-                        "tesla_powerwall",
-                        state="connected",
-                        mark_success=True,
-                        details={
-                            "site_id": site_id,
-                            "battery_percent": sample.get("battery_percent"),
-                            "grid_status": sample.get("grid_status"),
-                            "battery_power_watts": sample.get("battery_power_watts"),
-                        },
-                    )
-                except Exception as exc:
-                    LOGGER.exception("Tesla Powerwall poll failed")
-                    await self.statuses.update(
-                        "tesla_powerwall",
-                        state="error",
-                        error=str(exc),
-                        details={"energy_site_id": self.settings.tesla_energy_site_id},
-                    )
-                try:
-                    await asyncio.wait_for(self._stopped.wait(), timeout=self.settings.tesla_poll_seconds)
-                except asyncio.TimeoutError:
-                    continue
-
-    async def stop(self) -> None:
-        self._stopped.set()
-
-    async def _resolve_site_id(self, client: httpx.AsyncClient) -> str:
-        if self.settings.tesla_energy_site_id:
-            return self.settings.tesla_energy_site_id
-        products = await self.client.get_products(client)
-        for product in products:
-            energy_site_id = product.get("energy_site_id") or product.get("site_id")
-            if energy_site_id:
-                return str(energy_site_id)
-        raise RuntimeError("Tesla energy site not found; set TESLA_ENERGY_SITE_ID")
-
-    def _build_sample(self, site_id: str, live_status: dict[str, Any], site_info: dict[str, Any]) -> dict[str, Any]:
-        battery_power_watts = _coerce_float(
-            live_status.get("battery_power")
-            or live_status.get("battery_power_w")
-            or live_status.get("battery_power_in")
-        )
-        battery_percent = _coerce_float(
-            live_status.get("percentage_charged")
-            or live_status.get("battery_level")
-            or live_status.get("percentage")
-        )
-        return {
-            "site_id": site_id,
-            "battery_percent": battery_percent,
-            "battery_power_watts": battery_power_watts,
-            "battery_power_w_per_min": watts_to_rate_per_minute(abs(battery_power_watts)) if battery_power_watts is not None else None,
-            "load_power_watts": _coerce_float(live_status.get("load_power")),
-            "solar_power_watts": _coerce_float(live_status.get("solar_power")),
-            "grid_power_watts": _coerce_float(live_status.get("grid_power")),
-            "grid_status": live_status.get("grid_status"),
-            "storm_mode_active": live_status.get("storm_mode_active"),
-            "operation_mode": site_info.get("default_real_mode") or site_info.get("operation"),
-            "site_info": site_info,
-            "live_status": live_status,
-            "source_kind": "tesla_energy",
-        }
-
-
-class TeslaVehiclePoller:
-    def __init__(self, settings: Settings, database: Database, statuses: StatusRegistry) -> None:
-        self.settings = settings
-        self.database = database
-        self.statuses = statuses
-        self.client = TeslaApiClient(settings)
-        self._stopped = asyncio.Event()
-
-    async def run(self) -> None:
-        vins = [vin.strip() for vin in self.settings.tesla_vehicle_vins.split(",") if vin.strip()]
-        if not vins:
-            raise RuntimeError("Tesla is enabled but TESLA_VEHICLE_VINS is empty")
-        async with httpx.AsyncClient(timeout=self.settings.tesla_timeout_seconds) as http_client:
-            while not self._stopped.is_set():
-                for index, vin in enumerate(vins[:2], start=1):
-                    poller_name = f"tesla_vehicle_{index}"
-                    try:
-                        await self.statuses.update(poller_name, state="connecting", details={"vin": vin})
-                        vehicle = await self.client.get_vehicle(http_client, vin)
-                        vehicle_state_name = str(vehicle.get("state") or "").lower()
-                        vehicle_data = {}
-                        if vehicle_state_name not in {"offline", "asleep"}:
-                            vehicle_data = await self.client.get_vehicle_data(http_client, vin)
-                        sample = self._build_sample(index, vin, vehicle, vehicle_data)
-                        observed_at = datetime.now(timezone.utc)
-                        self.database.insert_sample(
-                            source=f"tesla_vehicle_{index}",
-                            observed_at=observed_at,
-                            grid_usage_watts=sample["charging_power_w_per_min"],
-                            solar_generation_watts=None,
-                            raw_payload=sample,
-                        )
-                        await self.statuses.update(
-                            poller_name,
-                            state="connected",
-                            mark_success=True,
-                            details={
-                                "display_name": sample.get("display_name"),
-                                "battery_percent": sample.get("battery_percent"),
-                                "charging_state": sample.get("charging_state"),
-                                "vehicle_state": sample.get("vehicle_state"),
-                                "live_data_polled": bool(vehicle_data),
-                            },
-                        )
-                    except Exception as exc:
-                        LOGGER.exception("Tesla vehicle poll failed for %s", vin)
-                        await self.statuses.update(
-                            poller_name,
-                            state="error",
-                            error=str(exc),
-                            details={"vin": vin},
-                        )
-                try:
-                    await asyncio.wait_for(self._stopped.wait(), timeout=self.settings.tesla_poll_seconds)
-                except asyncio.TimeoutError:
-                    continue
-
-    async def stop(self) -> None:
-        self._stopped.set()
-
-    def _build_sample(
-        self,
-        vehicle_index: int,
-        vin: str,
-        vehicle: dict[str, Any],
-        vehicle_data: dict[str, Any],
-    ) -> dict[str, Any]:
-        charge_state = vehicle_data.get("charge_state") if isinstance(vehicle_data.get("charge_state"), dict) else {}
-        vehicle_state = vehicle_data.get("vehicle_state") if isinstance(vehicle_data.get("vehicle_state"), dict) else {}
-        drive_state = vehicle_data.get("drive_state") if isinstance(vehicle_data.get("drive_state"), dict) else {}
-        charging_power_watts = _coerce_float(
-            charge_state.get("charger_power")
-            or charge_state.get("charge_power")
-        )
-        if charging_power_watts is not None and charging_power_watts < 100:
-            charging_power_watts *= 1000.0
-        battery_percent = _coerce_float(charge_state.get("battery_level"))
-        return {
-            "vehicle_index": vehicle_index,
-            "vin": vin,
-            "display_name": vehicle_state.get("vehicle_name") or vehicle.get("display_name") or f"Tesla {vehicle_index}",
-            "battery_percent": battery_percent,
-            "charging_state": charge_state.get("charging_state"),
-            "charging_power_watts": charging_power_watts,
-            "charging_power_w_per_min": watts_to_rate_per_minute(charging_power_watts) if charging_power_watts is not None else None,
-            "charge_limit_percent": _coerce_float(charge_state.get("charge_limit_soc") or charge_state.get("charge_limit_soc_std")),
-            "time_to_full_charge_hours": _coerce_float(charge_state.get("time_to_full_charge")),
-            "vehicle_state": vehicle.get("state"),
-            "odometer_km": _coerce_float(vehicle_state.get("odometer")),
-            "latitude": _coerce_float(drive_state.get("latitude")),
-            "longitude": _coerce_float(drive_state.get("longitude")),
-            "raw_vehicle": vehicle,
-            "raw_vehicle_data": vehicle_data,
-            "source_kind": "tesla_vehicle",
-        }
-
-
 class PollingCoordinator:
     def __init__(self, settings: Settings, database: Database) -> None:
         self.settings = settings
@@ -1996,20 +1617,6 @@ class PollingCoordinator:
             byd_poller = BydEvPoller(self.settings, self.database, self.statuses)
             self.pollers.append(byd_poller)
             self.tasks.append(asyncio.create_task(byd_poller.run(), name="byd-ev-poller"))
-
-        if self.settings.growatt_enabled:
-            growatt_poller = GrowattBatteryPoller(self.settings, self.database, self.statuses)
-            self.pollers.append(growatt_poller)
-            self.tasks.append(asyncio.create_task(growatt_poller.run(), name="growatt-battery-poller"))
-
-        if self.settings.tesla_enabled and self.settings.tesla_access_token:
-            tesla_energy_poller = TeslaEnergyPoller(self.settings, self.database, self.statuses)
-            self.pollers.append(tesla_energy_poller)
-            self.tasks.append(asyncio.create_task(tesla_energy_poller.run(), name="tesla-powerwall-poller"))
-
-            tesla_vehicle_poller = TeslaVehiclePoller(self.settings, self.database, self.statuses)
-            self.pollers.append(tesla_vehicle_poller)
-            self.tasks.append(asyncio.create_task(tesla_vehicle_poller.run(), name="tesla-vehicle-poller"))
 
         if self.settings.tuya_access_id and self.settings.tuya_access_secret and self.settings.tuya_device_id:
             tuya_automation = TuyaSolarChargingAutomation(self.settings, self.database, self.statuses)
