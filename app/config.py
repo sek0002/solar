@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
@@ -59,7 +59,7 @@ class Settings:
     app_auth_cookie_secure: bool = _env_bool("APP_AUTH_COOKIE_SECURE", True)
     app_auth_cookie_samesite: str = _env_cookie_samesite("APP_AUTH_COOKIE_SAMESITE", "lax")
     app_trust_proxy_headers: bool = _env_bool("APP_TRUST_PROXY_HEADERS", True)
-    app_trusted_proxies: list[str] = _env_csv("APP_TRUSTED_PROXIES", "*")
+    app_trusted_proxies: list[str] = field(default_factory=lambda: _env_csv("APP_TRUSTED_PROXIES", "*"))
     app_auth_session_hours: int = _env_int("APP_AUTH_SESSION_HOURS", 12)
     app_auth_pending_minutes: int = _env_int("APP_AUTH_PENDING_MINUTES", 5)
     poller_only: bool = _env_bool("POLLER_ONLY", False)

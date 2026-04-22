@@ -17,7 +17,6 @@ from fastapi import FastAPI, Header, HTTPException, Query, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 
 from app.auth import create_signed_token, verify_password, verify_signed_token, verify_totp
 from app.config import settings
@@ -26,6 +25,7 @@ from app.pollers import PollingCoordinator, TuyaCloudClient, tuya_command_lock
 
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+logger = logging.getLogger(__name__)
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
@@ -817,7 +817,12 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(title=settings.app_title, lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
 if settings.app_trust_proxy_headers:
-    app.add_middleware(ProxyHeadersMiddleware, trusted_hosts=settings.app_trusted_proxies)
+    try:
+        from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
+    except Exception as exc:
+        logger.warning("Proxy header middleware unavailable; continuing without it: %s", exc)
+    else:
+        app.add_middleware(ProxyHeadersMiddleware, trusted_hosts=settings.app_trusted_proxies)
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
 
 
