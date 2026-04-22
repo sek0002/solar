@@ -33,6 +33,13 @@ def _env_bool(name: str, default: bool) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _env_cookie_samesite(name: str, default: str) -> str:
+    value = (os.getenv(name) or default).strip().lower()
+    if value not in {"lax", "strict", "none"}:
+        return default
+    return value
+
+
 @dataclass
 class Settings:
     app_title: str = os.getenv("APP_TITLE", "Solar Monitor")
@@ -45,6 +52,7 @@ class Settings:
     app_auth_totp_secret: str = os.getenv("APP_AUTH_TOTP_SECRET", "")
     app_auth_session_secret: str = os.getenv("APP_AUTH_SESSION_SECRET", "")
     app_auth_cookie_secure: bool = _env_bool("APP_AUTH_COOKIE_SECURE", True)
+    app_auth_cookie_samesite: str = _env_cookie_samesite("APP_AUTH_COOKIE_SAMESITE", "lax")
     app_auth_session_hours: int = _env_int("APP_AUTH_SESSION_HOURS", 12)
     app_auth_pending_minutes: int = _env_int("APP_AUTH_PENDING_MINUTES", 5)
     poller_only: bool = _env_bool("POLLER_ONLY", False)

@@ -120,6 +120,13 @@ def _normalize_next_path(value: str | None) -> str:
     return value
 
 
+def _request_target(request: Request) -> str:
+    path = request.url.path or "/"
+    if request.url.query:
+        return f"{path}?{request.url.query}"
+    return path
+
+
 def _client_key(request: Request, suffix: str) -> str:
     return f"{request.client.host if request.client else 'unknown'}:{suffix}"
 
@@ -175,14 +182,24 @@ def _set_cookie(response: Response, name: str, value: str, *, max_age: int) -> N
         max_age=max_age,
         httponly=True,
         secure=settings.app_auth_cookie_secure,
-        samesite="strict",
+        samesite=settings.app_auth_cookie_samesite,
         path="/",
     )
 
 
 def _clear_auth_cookies(response: Response) -> None:
-    response.delete_cookie(AUTH_SESSION_COOKIE, path="/")
-    response.delete_cookie(AUTH_PENDING_COOKIE, path="/")
+    response.delete_cookie(
+        AUTH_SESSION_COOKIE,
+        path="/",
+        secure=settings.app_auth_cookie_secure,
+        samesite=settings.app_auth_cookie_samesite,
+    )
+    response.delete_cookie(
+        AUTH_PENDING_COOKIE,
+        path="/",
+        secure=settings.app_auth_cookie_secure,
+        samesite=settings.app_auth_cookie_samesite,
+    )
 
 
 async def _read_form_field(request: Request, field_name: str) -> str:
@@ -808,7 +825,7 @@ async def auth_middleware(request: Request, call_next):
             response = JSONResponse({"detail": "Authentication required"}, status_code=401)
             _apply_security_headers(response)
             return response
-        response = RedirectResponse(url=f"/login?next={_normalize_next_path(request.url.path)}", status_code=303)
+        response = RedirectResponse(url=f"/login?next={_normalize_next_path(_request_target(request))}", status_code=303)
         _clear_auth_cookies(response)
         _apply_security_headers(response)
         return response
