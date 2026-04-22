@@ -2,20 +2,23 @@ from __future__ import annotations
 
 import asyncio
 import html
+import json
 import logging
 import re
+import secrets
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
-from urllib.parse import urlencode
+from urllib.parse import parse_qs, urlencode, urlsplit
 
 import httpx
 from fastapi import FastAPI, Header, HTTPException, Query, Request
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
+from app.auth import create_signed_token, verify_password, verify_signed_token, verify_totp
 from app.config import settings
 from app.database import Database
 from app.pollers import PollingCoordinator, TuyaCloudClient, tuya_command_lock
@@ -28,6 +31,178 @@ templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 database = Database(settings.database_path, settings.timezone_name)
 coordinator = PollingCoordinator(settings, database)
 tuya_client = TuyaCloudClient(settings)
+AUTH_SESSION_COOKIE = "solar_session"
+AUTH_PENDING_COOKIE = "solar_pending"
+AUTH_ATTEMPTS: dict[str, list[float]] = {}
+
+
+def _validate_auth_settings() -> None:
+    if not settings.app_auth_enabled:
+        return
+    missing = [
+        name
+        for name, value in {
+            "APP_AUTH_USERNAME": settings.app_auth_username,
+            "APP_AUTH_PASSWORD_HASH": settings.app_auth_password_hash,
+            "APP_AUTH_TOTP_SECRET": settings.app_auth_totp_secret,
+            "APP_AUTH_SESSION_SECRET": settings.app_auth_session_secret,
+        }.items()
+        if not str(value).strip()
+    ]
+    if missing:
+        raise RuntimeError("Missing required auth settings: {}".format(", ".join(missing)))
+
+
+_validate_auth_settings()
+
+
+def _auth_token(secret_value: str) -> str:
+    time_now = datetime.now(timezone.utc).timestamp()
+    return create_signed_token(
+        {
+            "sub": settings.app_auth_username,
+            "iat": time_now,
+            "exp": time_now + settings.app_auth_session_hours * 3600,
+            "nonce": secrets.token_urlsafe(16),
+            "type": "session",
+        },
+        secret_value,
+    )
+
+
+def _pending_token(next_path: str) -> str:
+    now_ts = datetime.now(timezone.utc).timestamp()
+    return create_signed_token(
+        {
+            "sub": settings.app_auth_username,
+            "iat": now_ts,
+            "exp": now_ts + settings.app_auth_pending_minutes * 60,
+            "nonce": secrets.token_urlsafe(16),
+            "type": "pending",
+            "next": next_path,
+        },
+        settings.app_auth_session_secret,
+    )
+
+
+def _verify_session_cookie(request: Request) -> bool:
+    if not settings.app_auth_enabled:
+        return True
+    token = request.cookies.get(AUTH_SESSION_COOKIE)
+    if not token:
+        return False
+    payload = verify_signed_token(token, settings.app_auth_session_secret)
+    return bool(payload and payload.get("type") == "session" and payload.get("sub") == settings.app_auth_username)
+
+
+def _verify_pending_cookie(request: Request) -> dict[str, object] | None:
+    token = request.cookies.get(AUTH_PENDING_COOKIE)
+    if not token:
+        return None
+    payload = verify_signed_token(token, settings.app_auth_session_secret)
+    if not payload:
+        return None
+    if payload.get("type") != "pending" or payload.get("sub") != settings.app_auth_username:
+        return None
+    return payload
+
+
+def _normalize_next_path(value: str | None) -> str:
+    if not value:
+        return "/"
+    parsed = urlsplit(value)
+    if parsed.scheme or parsed.netloc:
+        return "/"
+    if not value.startswith("/"):
+        return "/"
+    return value
+
+
+def _client_key(request: Request, suffix: str) -> str:
+    return f"{request.client.host if request.client else 'unknown'}:{suffix}"
+
+
+def _check_rate_limit(key: str, *, limit: int = 5, window_seconds: int = 300) -> bool:
+    now_ts = datetime.now(timezone.utc).timestamp()
+    attempts = [timestamp for timestamp in AUTH_ATTEMPTS.get(key, []) if now_ts - timestamp < window_seconds]
+    AUTH_ATTEMPTS[key] = attempts
+    return len(attempts) < limit
+
+
+def _record_attempt(key: str) -> None:
+    now_ts = datetime.now(timezone.utc).timestamp()
+    AUTH_ATTEMPTS.setdefault(key, []).append(now_ts)
+
+
+def _clear_attempts(key: str) -> None:
+    AUTH_ATTEMPTS.pop(key, None)
+
+
+def _auth_exempt_path(path: str) -> bool:
+    if not settings.app_auth_enabled:
+        return True
+    exact_paths = {"/login", "/otp", "/logout", "/manifest.webmanifest", "/sw.js"}
+    if path in exact_paths:
+        return True
+    return path.startswith("/static/") or path.startswith("/api/ingest/")
+
+
+def _apply_security_headers(response: Response) -> None:
+    response.headers["X-Frame-Options"] = "SAMEORIGIN"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; "
+        "script-src 'self'; "
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+        "font-src 'self' https://fonts.gstatic.com data:; "
+        "img-src 'self' data: https:; "
+        "connect-src 'self'; "
+        "frame-src 'self' https://www.openstreetmap.org; "
+        "manifest-src 'self'; "
+        "base-uri 'self'; "
+        "frame-ancestors 'self'"
+    )
+
+
+def _set_cookie(response: Response, name: str, value: str, *, max_age: int) -> None:
+    response.set_cookie(
+        name,
+        value,
+        max_age=max_age,
+        httponly=True,
+        secure=settings.app_auth_cookie_secure,
+        samesite="strict",
+        path="/",
+    )
+
+
+def _clear_auth_cookies(response: Response) -> None:
+    response.delete_cookie(AUTH_SESSION_COOKIE, path="/")
+    response.delete_cookie(AUTH_PENDING_COOKIE, path="/")
+
+
+async def _read_form_field(request: Request, field_name: str) -> str:
+    body = await request.body()
+    values = parse_qs(body.decode("utf-8"), keep_blank_values=False)
+    return (values.get(field_name) or [""])[0].strip()
+
+
+def _render_auth_page(request: Request, *, step: str, error: str | None = None, next_path: str = "/") -> HTMLResponse:
+    response = templates.TemplateResponse(
+        request,
+        "auth.html",
+        {
+            "request": request,
+            "app_title": settings.app_title,
+            "step": step,
+            "error": error,
+            "next_path": next_path,
+        },
+    )
+    _apply_security_headers(response)
+    return response
 def _tuya_status_map(status_payload: list[dict[str, object]]) -> dict[str, object]:
     return {
         str(item.get("code")): item.get("value")
@@ -619,8 +794,90 @@ async def lifespan(_: FastAPI):
         await coordinator.stop()
 
 
-app = FastAPI(title=settings.app_title, lifespan=lifespan)
+app = FastAPI(title=settings.app_title, lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
+
+
+@app.middleware("http")
+async def auth_middleware(request: Request, call_next):
+    if settings.app_auth_enabled and not _auth_exempt_path(request.url.path) and not _verify_session_cookie(request):
+        if request.url.path.startswith("/api/"):
+            response = JSONResponse({"detail": "Authentication required"}, status_code=401)
+            _apply_security_headers(response)
+            return response
+        response = RedirectResponse(url=f"/login?next={_normalize_next_path(request.url.path)}", status_code=303)
+        _clear_auth_cookies(response)
+        _apply_security_headers(response)
+        return response
+
+    response = await call_next(request)
+    _apply_security_headers(response)
+    return response
+
+
+@app.get("/login", response_class=HTMLResponse)
+async def login_page(request: Request, next: Optional[str] = Query(default="/")) -> HTMLResponse:
+    if _verify_session_cookie(request):
+        return RedirectResponse(url=_normalize_next_path(next), status_code=303)
+    return _render_auth_page(request, step="login", next_path=_normalize_next_path(next))
+
+
+@app.post("/login", response_class=HTMLResponse)
+async def login_submit(request: Request) -> Response:
+    next_path = _normalize_next_path(await _read_form_field(request, "next"))
+    username = await _read_form_field(request, "username")
+    password = await _read_form_field(request, "password")
+    limit_key = _client_key(request, "login")
+    if not _check_rate_limit(limit_key):
+        return _render_auth_page(request, step="login", error="Please wait and try again.", next_path=next_path)
+    if username != settings.app_auth_username or not verify_password(password, settings.app_auth_password_hash):
+        _record_attempt(limit_key)
+        return _render_auth_page(request, step="login", error="Invalid credentials.", next_path=next_path)
+    _clear_attempts(limit_key)
+    response = RedirectResponse(url="/otp", status_code=303)
+    _set_cookie(response, AUTH_PENDING_COOKIE, _pending_token(next_path), max_age=settings.app_auth_pending_minutes * 60)
+    return response
+
+
+@app.get("/otp", response_class=HTMLResponse)
+async def otp_page(request: Request) -> Response:
+    if _verify_session_cookie(request):
+        return RedirectResponse(url="/", status_code=303)
+    pending = _verify_pending_cookie(request)
+    if not pending:
+        response = RedirectResponse(url="/login", status_code=303)
+        _clear_auth_cookies(response)
+        return response
+    return _render_auth_page(request, step="otp", next_path=_normalize_next_path(str(pending.get("next") or "/")))
+
+
+@app.post("/otp", response_class=HTMLResponse)
+async def otp_submit(request: Request) -> Response:
+    pending = _verify_pending_cookie(request)
+    if not pending:
+        response = RedirectResponse(url="/login", status_code=303)
+        _clear_auth_cookies(response)
+        return response
+    code = await _read_form_field(request, "otp_code")
+    limit_key = _client_key(request, "otp")
+    next_path = _normalize_next_path(str(pending.get("next") or "/"))
+    if not _check_rate_limit(limit_key):
+        return _render_auth_page(request, step="otp", error="Please wait and try again.", next_path=next_path)
+    if not verify_totp(settings.app_auth_totp_secret, code):
+        _record_attempt(limit_key)
+        return _render_auth_page(request, step="otp", error="Invalid one-time code.", next_path=next_path)
+    _clear_attempts(limit_key)
+    response = RedirectResponse(url=next_path, status_code=303)
+    _set_cookie(response, AUTH_SESSION_COOKIE, _auth_token(settings.app_auth_session_secret), max_age=settings.app_auth_session_hours * 3600)
+    response.delete_cookie(AUTH_PENDING_COOKIE, path="/")
+    return response
+
+
+@app.post("/logout")
+async def logout() -> Response:
+    response = RedirectResponse(url="/login", status_code=303)
+    _clear_auth_cookies(response)
+    return response
 
 
 @app.get("/manifest.webmanifest")
