@@ -32,6 +32,8 @@ const cumulativeChartElement = document.querySelector("#cumulative-chart");
 const hourlyChartElement = document.querySelector("#hourly-chart");
 const dailyChartElement = document.querySelector("#daily-chart");
 const weeklyChartElement = document.querySelector("#weekly-chart");
+const bydSummaryFrame = document.querySelector("#byd-summary-frame");
+const bydMapFrame = document.querySelector("#byd-map-frame");
 const appTimezone = window.SOLAR_MONITOR_CONFIG.timezoneName || "Australia/Melbourne";
 const tuyaControlEnabled = Boolean(window.SOLAR_MONITOR_CONFIG.tuyaControlEnabled);
 const uiStateKey = "solar-monitor-ui-state";
@@ -40,11 +42,64 @@ const refreshCacheKey = "solar-monitor-last-refresh";
 const appCacheVersion = (window.SOLAR_PWA && window.SOLAR_PWA.appVersion) || "dev";
 const pageLoadDefaultHours = 12;
 const apiRequestTimeoutMs = 15000;
+const isAndroidDevice = /Android/i.test(navigator.userAgent || "");
+const isCompactScreen = window.matchMedia("(max-width: 900px)").matches;
+const useLightweightDashboard = isAndroidDevice || isCompactScreen;
 let chargerCommandInFlight = false;
 let chargerPendingMessage = "";
 let chargerStateOverride = null;
 let automationCommandInFlight = false;
 let automationEnabledOverride = null;
+let deferredSummaryRenderTimer = null;
+let deferredSummaryRenderIdleHandle = null;
+
+function scheduleIdleWork(callback, timeoutMs = 1200) {
+  if ("requestIdleCallback" in window) {
+    return window.requestIdleCallback(callback, { timeout: timeoutMs });
+  }
+  return window.setTimeout(callback, timeoutMs);
+}
+
+function cancelIdleWork(handle) {
+  if (handle === null || handle === undefined) {
+    return;
+  }
+  if ("cancelIdleCallback" in window && typeof handle === "number") {
+    window.cancelIdleCallback(handle);
+    return;
+  }
+  window.clearTimeout(handle);
+}
+
+function loadDeferredIframe(frame) {
+  if (!frame || !frame.dataset || !frame.dataset.src || frame.src) {
+    return;
+  }
+  frame.src = frame.dataset.src;
+}
+
+function deferIframeLoad(frame) {
+  if (!frame || !frame.dataset || !frame.dataset.src) {
+    return;
+  }
+  if (!useLightweightDashboard) {
+    loadDeferredIframe(frame);
+    return;
+  }
+  if ("IntersectionObserver" in window) {
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach((entry) => {
+        if (entry.isIntersecting) {
+          loadDeferredIframe(frame);
+          observer.disconnect();
+        }
+      });
+    }, { rootMargin: "240px 0px" });
+    observer.observe(frame);
+    return;
+  }
+  scheduleIdleWork(() => loadDeferredIframe(frame), 1600);
+}
 
 function safeLocalStorageGet(key) {
   try {
@@ -1809,7 +1864,9 @@ function getSamplesFetchLimit(hours) {
   const pointsPerHourPerSource = Math.ceil(3600 / 15);
   const estimatedSources = 4;
   const estimatedPoints = Math.ceil(numericHours * pointsPerHourPerSource * estimatedSources * 1.1);
-  return Math.min(20000, Math.max(5000, estimatedPoints));
+  const hardCap = useLightweightDashboard ? 8000 : 20000;
+  const floor = useLightweightDashboard ? 2500 : 5000;
+  return Math.min(hardCap, Math.max(floor, estimatedPoints));
 }
 
 function shouldAggregateLineWindow(windowState) {
@@ -1876,7 +1933,7 @@ function renderDashboardCharts(items, windowState, cumulativeSeries, energySumma
   try {
     renderBleSolarChart(items, windowState);
     renderCumulativeChart(cumulativeSeries, windowState);
-    renderGenerationSummaryCharts({
+    const summaryPayload = {
       generation: {
         hourly: {
           solar: toEnergyMap(energySummary && energySummary.generation && energySummary.generation.hourly && energySummary.generation.hourly.solar),
@@ -1897,7 +1954,12 @@ function renderDashboardCharts(items, windowState, cumulativeSeries, energySumma
           ev: toEnergyMap(energySummary && energySummary.generation && energySummary.generation.weekly && energySummary.generation.weekly.ev)
         }
       }
-    });
+    };
+    if (useLightweightDashboard) {
+      scheduleDeferredSummaryCharts(summaryPayload);
+    } else {
+      renderGenerationSummaryCharts(summaryPayload);
+    }
     return true;
   } catch (error) {
     console.error("Chart render failed", error);
@@ -2086,6 +2148,26 @@ function renderGenerationSummaryCharts(summaryData) {
   renderGenerationSummaryChart(hourlyChartElement, summaryData.generation.hourly, formatHourBucketLabel);
   renderGenerationSummaryChart(dailyChartElement, summaryData.generation.daily, formatDayBucketLabel);
   renderGenerationSummaryChart(weeklyChartElement, summaryData.generation.weekly, formatWeekBucketLabel);
+}
+
+function scheduleDeferredSummaryCharts(summaryData) {
+  if (deferredSummaryRenderTimer) {
+    window.clearTimeout(deferredSummaryRenderTimer);
+  }
+  if (deferredSummaryRenderIdleHandle !== null) {
+    cancelIdleWork(deferredSummaryRenderIdleHandle);
+    deferredSummaryRenderIdleHandle = null;
+  }
+  renderChartPlaceholder(hourlyChartElement, "Loading summary chart...");
+  renderChartPlaceholder(dailyChartElement, "Loading summary chart...");
+  renderChartPlaceholder(weeklyChartElement, "Loading summary chart...");
+  deferredSummaryRenderTimer = window.setTimeout(() => {
+    deferredSummaryRenderTimer = null;
+    deferredSummaryRenderIdleHandle = scheduleIdleWork(() => {
+      deferredSummaryRenderIdleHandle = null;
+      renderGenerationSummaryCharts(summaryData);
+    }, 1200);
+  }, 250);
 }
 
 function renderEmptyCharts() {
@@ -2513,5 +2595,7 @@ if ("serviceWorker" in navigator) {
     });
   });
 }
+deferIframeLoad(bydSummaryFrame);
+deferIframeLoad(bydMapFrame);
 refresh();
-setInterval(refresh, 30000);
+setInterval(refresh, useLightweightDashboard ? 45000 : 30000);

@@ -1014,6 +1014,14 @@ input[type="range"] {
     grid-template-columns: 1fr;
   }
 
+  .grouped-chart-panel,
+  .byd-status-panel,
+  .shell > .panel,
+  .grid > .panel {
+    content-visibility: auto;
+    contain-intrinsic-size: 420px;
+  }
+
   .charts-grid-three {
     grid-template-columns: 1fr;
   }

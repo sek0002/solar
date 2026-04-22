@@ -131,7 +131,7 @@
       </div>
     </section>
 
-    <section class="panel grouped-chart-panel">
+    <section id="energy-summary-panel" class="panel grouped-chart-panel">
       <div class="panel-header">
         <div>
           <h2>Live energy charts</h2>
@@ -191,7 +191,7 @@
       </div>
     </section>
 
-    <section class="panel grouped-chart-panel byd-status-panel">
+    <section id="byd-status-panel" class="panel grouped-chart-panel byd-status-panel">
       <div class="charts-grid charts-grid-two byd-status-grid">
         <section class="chart-panel-subsection byd-status-subsection">
           <div class="subchart-header">
@@ -200,7 +200,7 @@
           </div>
           <iframe
             id="byd-summary-frame"
-            src="/byd?embed=1"
+            data-src="/byd?embed=1"
             title="BYD vehicle status"
             loading="lazy"
             referrerpolicy="same-origin"
@@ -215,7 +215,7 @@
           {% if byd_map_embed_url %}
           <iframe
             id="byd-map-frame"
-            src="{{ byd_map_embed_url }}"
+            data-src="{{ byd_map_embed_url }}"
             title="BYD map location"
             loading="lazy"
             referrerpolicy="no-referrer-when-downgrade"
