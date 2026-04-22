@@ -1245,22 +1245,22 @@ class TuyaSolarChargingAutomation:
         average_solar_kw = self._rate_per_minute_to_kw_per_hour(average_solar)
         target_current = None
         target_enabled = None
-        reason = "No sustained threshold change"
-        if min_solar_kw >= float(self.settings.tuya_solar_automation_13a_watts):
+        reason = "No average threshold change"
+        if average_solar_kw >= float(self.settings.tuya_solar_automation_13a_watts):
             target_enabled = True
             target_current = 13
-            reason = "Sustained solar surplus for 13A"
-        elif min_solar_kw >= float(self.settings.tuya_solar_automation_10a_watts):
+            reason = "Average solar surplus for 13A"
+        elif average_solar_kw >= float(self.settings.tuya_solar_automation_10a_watts):
             target_enabled = True
             target_current = 10
-            reason = "Sustained solar surplus for 10A"
-        elif min_solar_kw >= float(self.settings.tuya_solar_automation_6a_watts):
+            reason = "Average solar surplus for 10A"
+        elif average_solar_kw >= float(self.settings.tuya_solar_automation_6a_watts):
             target_enabled = True
             target_current = 6
-            reason = "Sustained solar surplus for 6A"
-        elif max_solar_kw < float(self.settings.tuya_solar_automation_6a_watts):
+            reason = "Average solar surplus for 6A"
+        elif average_solar_kw < float(self.settings.tuya_solar_automation_6a_watts):
             target_enabled = False
-            reason = "Sustained solar below charging threshold"
+            reason = "Average solar below charging threshold"
 
         mode = "target" if target_enabled is not None else "waiting"
         return {
@@ -1328,14 +1328,14 @@ class TuyaSolarChargingAutomation:
         max_ble_kw = self._rate_per_minute_to_kw_per_hour(max_ble)
         average_ble_kw = self._rate_per_minute_to_kw_per_hour(average_ble)
         guard_watts = float(self.settings.tuya_ble_guard_watts)
-        if min_ble_kw < guard_watts:
+        if average_ble_kw < guard_watts:
             return None
 
         cooldown_minutes = max(1.0, float(self.settings.tuya_ble_guard_cooldown_minutes))
         self._ble_guard_hold_until = now_utc + timedelta(minutes=cooldown_minutes)
         return {
             "mode": "target",
-            "reason": "BLE grid guard triggered",
+            "reason": "BLE grid guard triggered by average import",
             "target_enabled": False,
             "target_current": None,
             "ble_guard_active": True,
