@@ -39,11 +39,62 @@ const appCacheVersionKey = "solar-monitor-cache-version";
 const refreshCacheKey = "solar-monitor-last-refresh";
 const appCacheVersion = (window.SOLAR_PWA && window.SOLAR_PWA.appVersion) || "dev";
 const pageLoadDefaultHours = 12;
+const apiRequestTimeoutMs = 15000;
 let chargerCommandInFlight = false;
 let chargerPendingMessage = "";
 let chargerStateOverride = null;
 let automationCommandInFlight = false;
 let automationEnabledOverride = null;
+
+function safeLocalStorageGet(key) {
+  try {
+    return localStorage.getItem(key);
+  } catch (error) {
+    console.warn("Unable to read localStorage", error);
+    return null;
+  }
+}
+
+function safeLocalStorageSet(key, value) {
+  try {
+    localStorage.setItem(key, value);
+  } catch (error) {
+    console.warn("Unable to write localStorage", error);
+  }
+}
+
+function safeLocalStorageRemove(key) {
+  try {
+    localStorage.removeItem(key);
+  } catch (error) {
+    console.warn("Unable to remove localStorage value", error);
+  }
+}
+
+function safeSessionStorageGet(key) {
+  try {
+    return sessionStorage.getItem(key);
+  } catch (error) {
+    console.warn("Unable to read sessionStorage", error);
+    return null;
+  }
+}
+
+function safeSessionStorageSet(key, value) {
+  try {
+    sessionStorage.setItem(key, value);
+  } catch (error) {
+    console.warn("Unable to write sessionStorage", error);
+  }
+}
+
+function safeSessionStorageRemove(key) {
+  try {
+    sessionStorage.removeItem(key);
+  } catch (error) {
+    console.warn("Unable to remove sessionStorage value", error);
+  }
+}
 
 function setChargerControlsBusy(isBusy) {
   chargerCommandInFlight = isBusy;
@@ -63,8 +114,8 @@ function setAutomationControlBusy(isBusy) {
 }
 
 function resetVersionedClientCache() {
-  localStorage.removeItem(uiStateKey);
-  sessionStorage.removeItem(refreshCacheKey);
+  safeLocalStorageRemove(uiStateKey);
+  safeSessionStorageRemove(refreshCacheKey);
   if ("caches" in window) {
     caches.keys()
       .then((keys) => Promise.all(keys.map((key) => caches.delete(key))))
@@ -72,15 +123,15 @@ function resetVersionedClientCache() {
   }
 }
 
-const storedCacheVersion = localStorage.getItem(appCacheVersionKey);
+const storedCacheVersion = safeLocalStorageGet(appCacheVersionKey);
 if (storedCacheVersion !== appCacheVersion) {
   resetVersionedClientCache();
-  localStorage.setItem(appCacheVersionKey, appCacheVersion);
+  safeLocalStorageSet(appCacheVersionKey, appCacheVersion);
 }
 
 function loadUiState() {
   try {
-    return JSON.parse(localStorage.getItem(uiStateKey) || "{}");
+    return JSON.parse(safeLocalStorageGet(uiStateKey) || "{}");
   } catch (error) {
     console.warn("Unable to parse stored UI state", error);
     return {};
@@ -90,7 +141,7 @@ function loadUiState() {
 let uiState = loadUiState();
 
 function saveUiState() {
-  localStorage.setItem(uiStateKey, JSON.stringify(uiState));
+  safeLocalStorageSet(uiStateKey, JSON.stringify(uiState));
 }
 
 function updateUiState(mutator) {
@@ -120,8 +171,22 @@ function getTheme() {
 
 function setTheme(theme) {
   document.documentElement.dataset.theme = theme;
-  localStorage.setItem("solar-monitor-theme", theme);
+  safeLocalStorageSet("solar-monitor-theme", theme);
   themeToggle.textContent = theme === "dark" ? "Light mode" : "Dark mode";
+}
+
+async function fetchJson(url, timeoutMs = apiRequestTimeoutMs) {
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, { signal: controller.signal });
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    return await response.json();
+  } finally {
+    window.clearTimeout(timeoutId);
+  }
 }
 
 function buildLocalDateTime(dateValue, timeValue = "00:00") {
@@ -2042,7 +2107,7 @@ function buildRefreshRequest(hours, safeStart, end) {
 
 function loadRefreshCache() {
   try {
-    return JSON.parse(sessionStorage.getItem(refreshCacheKey) || "null");
+    return JSON.parse(safeSessionStorageGet(refreshCacheKey) || "null");
   } catch (error) {
     console.warn("Unable to parse cached refresh payload", error);
     return null;
@@ -2051,7 +2116,7 @@ function loadRefreshCache() {
 
 function saveRefreshCache(payload) {
   try {
-    sessionStorage.setItem(refreshCacheKey, JSON.stringify(payload));
+    safeSessionStorageSet(refreshCacheKey, JSON.stringify(payload));
   } catch (error) {
     console.warn("Unable to persist cached refresh payload", error);
   }
@@ -2174,21 +2239,36 @@ async function refresh() {
     const windowState = buildWindowState(safeStart, end);
     const request = buildRefreshRequest(hours, safeStart, end);
     const fetchLimit = getSamplesFetchLimit(hours);
-    const [statusResponse, samplesResponse, cumulativeResponse, energySummaryResponse] = await Promise.all([
-      fetch("/api/status"),
-      fetch(`/api/samples?hours=${hours}&limit=${fetchLimit}&start=${encodeURIComponent(safeStart.toISOString())}&end=${encodeURIComponent(end.toISOString())}`),
-      fetch("/api/cumulative"),
-      fetch("/api/energy-summary")
+    const [statusResult, samplesResult, cumulativeResult, energySummaryResult] = await Promise.allSettled([
+      fetchJson("/api/status"),
+      fetchJson(`/api/samples?hours=${hours}&limit=${fetchLimit}&start=${encodeURIComponent(safeStart.toISOString())}&end=${encodeURIComponent(end.toISOString())}`),
+      fetchJson("/api/cumulative"),
+      fetchJson("/api/energy-summary")
     ]);
 
-    if (!statusResponse.ok || !samplesResponse.ok || !cumulativeResponse.ok || !energySummaryResponse.ok) {
-      throw new Error(`HTTP ${statusResponse.status}/${samplesResponse.status}/${cumulativeResponse.status}/${energySummaryResponse.status}`);
+    if (statusResult.status !== "fulfilled" || samplesResult.status !== "fulfilled") {
+      const statusReason = statusResult.status === "rejected" ? statusResult.reason : null;
+      const samplesReason = samplesResult.status === "rejected" ? samplesResult.reason : null;
+      throw statusReason || samplesReason || new Error("Unable to load dashboard data");
     }
 
-    const statusPayload = await statusResponse.json();
-    const samplesPayload = await samplesResponse.json();
-    const cumulativePayload = await cumulativeResponse.json();
-    const energySummary = await energySummaryResponse.json();
+    const statusPayload = statusResult.value;
+    const samplesPayload = samplesResult.value;
+    const cumulativePayload = cumulativeResult.status === "fulfilled" ? cumulativeResult.value : { items: { solar: [], grid: [], ev: [] } };
+    const energySummary = energySummaryResult.status === "fulfilled"
+      ? energySummaryResult.value
+      : {
+          totals: {
+            daily: { solar: 0, grid: 0, offpeak: 0, ev: 0, net: 0 },
+            weekly: { solar: 0, grid: 0, offpeak: 0, ev: 0, net: 0 },
+            monthly: { solar: 0, grid: 0, offpeak: 0, ev: 0, net: 0 }
+          },
+          generation: {
+            hourly: { solar: {}, grid: {}, offpeak: {}, ev: {} },
+            daily: { solar: {}, grid: {}, offpeak: {}, ev: {} },
+            weekly: { solar: {}, grid: {}, offpeak: {}, ev: {} }
+          }
+        };
     const items = Array.isArray(samplesPayload.items) ? samplesPayload.items : [];
     const cumulativeSeries = cumulativePayload && cumulativePayload.items ? cumulativePayload.items : { solar: [], grid: [], ev: [] };
 
@@ -2200,6 +2280,12 @@ async function refresh() {
       cumulativeSeries,
       energySummary
     });
+    if (cumulativeResult.status === "rejected") {
+      console.warn("Unable to load cumulative series", cumulativeResult.reason);
+    }
+    if (energySummaryResult.status === "rejected") {
+      console.warn("Unable to load energy summary", energySummaryResult.reason);
+    }
     renderDashboardState(
       statusPayload,
       items,
@@ -2236,7 +2322,7 @@ function scheduleRefresh(delay = 150) {
   }, delay);
 }
 
-const storedTheme = localStorage.getItem("solar-monitor-theme");
+const storedTheme = safeLocalStorageGet("solar-monitor-theme");
 setTheme(storedTheme || "light");
 if (isFixedRange() && uiState.controls && uiState.controls.startDate) {
   startDateInput.value = uiState.controls.startDate;
