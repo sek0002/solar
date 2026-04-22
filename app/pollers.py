@@ -1240,22 +1240,25 @@ class TuyaSolarChargingAutomation:
         min_solar = min(solar_values)
         max_solar = max(solar_values)
         average_solar = sum(solar_values) / len(solar_values)
+        min_solar_kw = self._rate_per_minute_to_kw_per_hour(min_solar)
+        max_solar_kw = self._rate_per_minute_to_kw_per_hour(max_solar)
+        average_solar_kw = self._rate_per_minute_to_kw_per_hour(average_solar)
         target_current = None
         target_enabled = None
         reason = "No sustained threshold change"
-        if min_solar >= float(self.settings.tuya_solar_automation_13a_watts):
+        if min_solar_kw >= float(self.settings.tuya_solar_automation_13a_watts):
             target_enabled = True
             target_current = 13
             reason = "Sustained solar surplus for 13A"
-        elif min_solar >= float(self.settings.tuya_solar_automation_10a_watts):
+        elif min_solar_kw >= float(self.settings.tuya_solar_automation_10a_watts):
             target_enabled = True
             target_current = 10
             reason = "Sustained solar surplus for 10A"
-        elif min_solar >= float(self.settings.tuya_solar_automation_6a_watts):
+        elif min_solar_kw >= float(self.settings.tuya_solar_automation_6a_watts):
             target_enabled = True
             target_current = 6
             reason = "Sustained solar surplus for 6A"
-        elif max_solar < float(self.settings.tuya_solar_automation_6a_watts):
+        elif max_solar_kw < float(self.settings.tuya_solar_automation_6a_watts):
             target_enabled = False
             reason = "Sustained solar below charging threshold"
 
@@ -1269,6 +1272,9 @@ class TuyaSolarChargingAutomation:
             "min_solar_watts": round(min_solar, 1),
             "max_solar_watts": round(max_solar, 1),
             "average_solar_watts": round(average_solar, 1),
+            "min_solar_kw": round(min_solar_kw, 3),
+            "max_solar_kw": round(max_solar_kw, 3),
+            "average_solar_kw": round(average_solar_kw, 3),
             "target_enabled": target_enabled,
             "target_current": target_current,
             "latest_observed_at": str(local_site_samples[-1]["observed_at"]),
@@ -1318,8 +1324,11 @@ class TuyaSolarChargingAutomation:
         min_ble = min(ble_values)
         max_ble = max(ble_values)
         average_ble = sum(ble_values) / len(ble_values)
+        min_ble_kw = self._rate_per_minute_to_kw_per_hour(min_ble)
+        max_ble_kw = self._rate_per_minute_to_kw_per_hour(max_ble)
+        average_ble_kw = self._rate_per_minute_to_kw_per_hour(average_ble)
         guard_watts = float(self.settings.tuya_ble_guard_watts)
-        if min_ble < guard_watts:
+        if min_ble_kw < guard_watts:
             return None
 
         cooldown_minutes = max(1.0, float(self.settings.tuya_ble_guard_cooldown_minutes))
@@ -1340,6 +1349,9 @@ class TuyaSolarChargingAutomation:
             "min_ble_watts": round(min_ble, 1),
             "max_ble_watts": round(max_ble, 1),
             "average_ble_watts": round(average_ble, 1),
+            "min_ble_kw": round(min_ble_kw, 3),
+            "max_ble_kw": round(max_ble_kw, 3),
+            "average_ble_kw": round(average_ble_kw, 3),
             "latest_observed_at": str(ble_samples[-1]["observed_at"]),
         }
 
@@ -1464,6 +1476,10 @@ class TuyaSolarChargingAutomation:
         if start_hour < end_hour:
             return start_hour <= current_hour < end_hour
         return current_hour >= start_hour or current_hour < end_hour
+
+    @staticmethod
+    def _rate_per_minute_to_kw_per_hour(value: float) -> float:
+        return (float(value) * 60.0) / 1000.0
 
 
 
