@@ -6,6 +6,9 @@ const resetRangeButton = document.querySelector("#reset-range");
 const statusCards = document.querySelector("#status-cards");
 const collectorStrip = document.querySelector("#collector-strip");
 const latestValues = document.querySelector("#latest-values");
+const systemOverview = document.querySelector("#system-overview");
+const teslaVehicleCard1 = document.querySelector("#tesla-vehicle-card-1");
+const teslaVehicleCard2 = document.querySelector("#tesla-vehicle-card-2");
 const totalsTableBody = document.querySelector("#totals-table-body");
 const refreshText = document.querySelector("#last-refresh");
 const batteryText = document.querySelector("#powerpal-battery");
@@ -454,17 +457,20 @@ function renderTopbarGauge(samples) {
     topbarSolarValue.textContent = formatGaugeKwPerHour(solarRate);
   }
   if (topbarBleValue) {
-    topbarBleValue.textContent = bleRate === null ? "BLE n/a" : `BLE ${formatGaugeKwPerHour(bleRate)}`;
+    topbarBleValue.textContent = bleRate === null ? "Growatt n/a" : `Growatt ${formatGaugeKwPerHour(bleRate)}`;
   }
 }
 
 function renderBydTopbarGauge(samples, pollers) {
+  const powerwallSample = (samples || []).find((item) => item.source === "tesla_powerwall");
   const bydSample = (samples || []).find((item) => item.source === "byd_ev");
-  const glWatts = bydSample ? getBydPowerWatts(bydSample) : null;
+  const glWatts = powerwallSample
+    ? Number(powerwallSample.raw_payload && powerwallSample.raw_payload.battery_power_watts)
+    : (bydSample ? getBydPowerWatts(bydSample) : null);
   const glRate = glWatts;
-  const socPercent = getBydSocPercent(samples, pollers);
+  const socPercent = getPrimaryStoragePercent(samples, pollers);
   const socProgress = clamp((socPercent === null ? 0 : socPercent / 100), 0, 1);
-  const fillColor = getInfernoSolarColorFromWatts(glRate, 3);
+  const fillColor = getInfernoSolarColorFromWatts(glRate, 6);
   const textColors = getGaugeTextColors(fillColor);
 
   if (topbarBydGauge) {
@@ -478,7 +484,7 @@ function renderBydTopbarGauge(samples, pollers) {
     topbarBydValue.textContent = formatGaugeKwPerHourFromWatts(glRate);
   }
   if (topbarBydSubvalue) {
-    topbarBydSubvalue.textContent = socPercent === null ? "SoC n/a" : `SoC ${socPercent.toFixed(0)}%`;
+    topbarBydSubvalue.textContent = socPercent === null ? "Battery n/a" : `Battery ${socPercent.toFixed(0)}%`;
   }
 }
 
@@ -935,6 +941,12 @@ function getCollectorChipClass(state) {
 }
 
 function formatCollectorLabel(name) {
+  if (name === "ble") {
+    return "Growatt";
+  }
+  if (name === "network_ble") {
+    return "Growatt";
+  }
   return String(name || "")
     .replace(/_/g, " ")
     .replace(/\b\w/g, (char) => char.toUpperCase());
@@ -1086,6 +1098,50 @@ function formatMetricReadingPower(label, value) {
 
 function formatMetricCard(item) {
   const isImputed = item.raw_payload && item.raw_payload.imputed;
+  if (item.source === "growatt_battery") {
+    const payload = item.raw_payload || {};
+    return `
+      <article class="metric-card">
+        <span>growatt_battery</span>
+        ${formatMetricReadingPower("Battery", payload.power_watts)}
+        <small>SoC: ${payload.soc_percent === null || payload.soc_percent === undefined ? "n/a" : `${Number(payload.soc_percent).toFixed(0)}%`}</small>
+        <small>Status: ${payload.battery_status || "n/a"}</small>
+        <small>Temp: ${payload.temperature_c === null || payload.temperature_c === undefined ? "n/a" : `${Number(payload.temperature_c).toFixed(1)} C`}</small>
+        <small>${formatDateTime(item.observed_at)}</small>
+      </article>
+    `;
+  }
+  if (item.source === "tesla_powerwall") {
+    const payload = item.raw_payload || {};
+    return `
+      <article class="metric-card">
+        <span>tesla_powerwall</span>
+        ${formatMetricReadingPower("Battery", payload.battery_power_watts)}
+        <small>Battery: ${payload.battery_percent === null || payload.battery_percent === undefined ? "n/a" : `${Number(payload.battery_percent).toFixed(0)}%`}</small>
+        <small>Grid: ${payload.grid_status || "n/a"}</small>
+        <small>Mode: ${payload.operation_mode || "n/a"}</small>
+        <small>${formatDateTime(item.observed_at)}</small>
+      </article>
+    `;
+  }
+  if (/^tesla_vehicle_\d+$/.test(item.source)) {
+    const payload = item.raw_payload || {};
+    const etaHours = Number(payload.time_to_full_charge_hours);
+    const etaText = Number.isFinite(etaHours)
+      ? `${Math.floor(etaHours)}h ${Math.round((etaHours % 1) * 60)}m`
+      : "n/a";
+    return `
+      <article class="metric-card">
+        <span>${item.source}</span>
+        ${formatMetricReadingPower(payload.display_name || "Tesla", payload.charging_power_watts)}
+        <small>Battery: ${payload.battery_percent === null || payload.battery_percent === undefined ? "n/a" : `${Number(payload.battery_percent).toFixed(0)}%`}</small>
+        <small>Charge state: ${payload.charging_state || "n/a"}</small>
+        <small>Vehicle state: ${payload.vehicle_state || "n/a"}</small>
+        <small>ETA: ${etaText}</small>
+        <small>${formatDateTime(item.observed_at)}</small>
+      </article>
+    `;
+  }
   if (item.source === "byd_ev") {
     const payload = item.raw_payload || {};
     const chargingPower = getBydPowerWatts(item);
@@ -1108,13 +1164,42 @@ function formatMetricCard(item) {
   }
   return `
     <article class="metric-card">
-      <span>${item.source}</span>
+      <span>${formatCollectorLabel(item.source)}</span>
       ${formatMetricReading("Grid", item.grid_usage_watts)}
       ${formatMetricReading("Solar", item.solar_generation_watts)}
       <small>${isImputed ? "Estimated from previous readings" : "Live reading"}</small>
       <small>${formatDateTime(item.observed_at)}</small>
     </article>
   `;
+}
+
+function renderSystemOverview(items) {
+  if (!systemOverview) {
+    return;
+  }
+  const desiredSources = ["growatt_battery", "tesla_powerwall", "tesla_vehicle_1", "tesla_vehicle_2"];
+  const latestBySource = new Map((items || []).map((item) => [item.source, item]));
+  const cards = desiredSources
+    .map((source) => latestBySource.get(source))
+    .filter(Boolean)
+    .map((item) => formatMetricCard(item))
+    .join("");
+  if (cards) {
+    systemOverview.innerHTML = cards;
+  }
+}
+
+function renderTeslaVehicleCards(items) {
+  const latestBySource = new Map((items || []).map((item) => [item.source, item]));
+  const card1 = latestBySource.get("tesla_vehicle_1");
+  const card2 = latestBySource.get("tesla_vehicle_2");
+
+  if (teslaVehicleCard1 && card1) {
+    teslaVehicleCard1.innerHTML = formatMetricCard(card1);
+  }
+  if (teslaVehicleCard2 && card2) {
+    teslaVehicleCard2.innerHTML = formatMetricCard(card2);
+  }
 }
 
 function formatStatCard(label, value, detail) {
@@ -1453,13 +1538,40 @@ function getBydSocPercent(samples, pollers) {
   return Number.isFinite(numeric) ? Math.max(0, Math.min(100, numeric)) : null;
 }
 
+function getPrimaryStoragePercent(samples, pollers) {
+  const powerwallSample = (samples || []).find((item) => item.source === "tesla_powerwall");
+  const powerwallPercent = Number(powerwallSample && powerwallSample.raw_payload && powerwallSample.raw_payload.battery_percent);
+  if (Number.isFinite(powerwallPercent)) {
+    return Math.max(0, Math.min(100, powerwallPercent));
+  }
+  const growattSample = (samples || []).find((item) => item.source === "growatt_battery");
+  const growattPercent = Number(growattSample && growattSample.raw_payload && growattSample.raw_payload.soc_percent);
+  if (Number.isFinite(growattPercent)) {
+    return Math.max(0, Math.min(100, growattPercent));
+  }
+  return getBydSocPercent(samples, pollers);
+}
+
+function getPrimaryVehiclePercent(samples, pollers) {
+  const teslaSamples = (samples || [])
+    .filter((item) => /^tesla_vehicle_\d+$/.test(item.source))
+    .sort((left, right) => new Date(right.observed_at) - new Date(left.observed_at));
+  for (const item of teslaSamples) {
+    const batteryPercent = Number(item.raw_payload && item.raw_payload.battery_percent);
+    if (Number.isFinite(batteryPercent)) {
+      return Math.max(0, Math.min(100, batteryPercent));
+    }
+  }
+  return getBydSocPercent(samples, pollers);
+}
+
 function renderEvBatteryState(samples, pollers) {
-  const socPercent = getBydSocPercent(samples, pollers);
+  const socPercent = getPrimaryVehiclePercent(samples, pollers);
   if (evBatteryFill) {
     evBatteryFill.style.width = socPercent === null ? "0%" : `${socPercent}%`;
   }
   if (evBatteryLabel) {
-    evBatteryLabel.textContent = socPercent === null ? "EV SoC n/a" : `EV SoC ${socPercent.toFixed(0)}%`;
+    evBatteryLabel.textContent = socPercent === null ? "Vehicle SoC n/a" : `Vehicle SoC ${socPercent.toFixed(0)}%`;
   }
 }
 
@@ -1853,7 +1965,7 @@ function renderBleSolarChart(items, windowState) {
 
   createLineChart(bleChartElement, [
     {
-      label: "BLE grid",
+      label: "Battery",
       data: aggregateLineSeries(bleGrid.map((item) => ({
         x: toChartTime(item.observed_at).getTime(),
         y: ratePerMinuteToKwPerHour(item.grid_usage_watts),
@@ -1877,7 +1989,7 @@ function renderBleSolarChart(items, windowState) {
       fill: true
     },
     {
-      label: "BYD EV",
+      label: "Powerwall",
       data: aggregateLineSeries(evItems.map((item) => ({
         x: toChartTime(item.observed_at).getTime(),
         y: wattsToKw(item.power_w),
@@ -1950,7 +2062,7 @@ function renderCumulativeChart(cumulativeSeries, windowState) {
       fill: true
     },
     {
-      label: "BLE grid cumulative",
+      label: "Battery cumulative",
       data: aggregateLineSeries(gridKwh.map((item) => ({
         x: toChartTime(item.observed_at).getTime(),
         y: item.cumulative_kwh
@@ -1960,7 +2072,7 @@ function renderCumulativeChart(cumulativeSeries, windowState) {
       fill: true
     },
     {
-      label: "BYD EV cumulative",
+      label: "Powerwall cumulative",
       data: aggregateLineSeries(evKwh.map((item) => ({
         x: toChartTime(item.observed_at).getTime(),
         y: item.cumulative_kwh
@@ -1991,7 +2103,7 @@ function renderGenerationSummaryChart(element, totalsBySource, formatter) {
       categoryPercentage: 0.74
     },
     {
-      label: "BLE grid",
+      label: "Battery",
       data: allLabels.map((label) => Number(totalsBySource.grid.get(label) || 0)),
       backgroundColor: dark ? "#7fb0ff" : "#6f96d8",
       borderRadius: 4,
@@ -2007,7 +2119,7 @@ function renderGenerationSummaryChart(element, totalsBySource, formatter) {
       categoryPercentage: 0.74
     },
     {
-      label: "BYD EV",
+      label: "Powerwall",
       data: allLabels.map((label) => Number(totalsBySource.ev.get(label) || 0)),
       backgroundColor: dark ? "#ffb45b" : "#d6882e",
       borderRadius: 4,
@@ -2096,6 +2208,8 @@ function renderDashboardState(statusPayload, items, cumulativeSeries, energySumm
   }
   renderStatusCards(statusPayload.pollers);
   renderCollectorStrip(statusPayload.pollers);
+  renderSystemOverview(statusPayload.latest_samples);
+  renderTeslaVehicleCards(statusPayload.latest_samples);
   latestValues.innerHTML = statusPayload.latest_samples
     .filter((item) => item.source !== "tuya_ev")
     .map(formatMetricCard)
