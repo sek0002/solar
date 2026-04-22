@@ -17,6 +17,7 @@ from fastapi import FastAPI, Header, HTTPException, Query, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 
 from app.auth import create_signed_token, verify_password, verify_signed_token, verify_totp
 from app.config import settings
@@ -815,6 +816,8 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(title=settings.app_title, lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
+if settings.app_trust_proxy_headers:
+    app.add_middleware(ProxyHeadersMiddleware, trusted_hosts=settings.app_trusted_proxies)
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
 
 

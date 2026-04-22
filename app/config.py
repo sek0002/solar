@@ -40,6 +40,11 @@ def _env_cookie_samesite(name: str, default: str) -> str:
     return value
 
 
+def _env_csv(name: str, default: str) -> list[str]:
+    value = os.getenv(name, default)
+    return [item.strip() for item in value.split(",") if item.strip()]
+
+
 @dataclass
 class Settings:
     app_title: str = os.getenv("APP_TITLE", "Solar Monitor")
@@ -53,6 +58,8 @@ class Settings:
     app_auth_session_secret: str = os.getenv("APP_AUTH_SESSION_SECRET", "")
     app_auth_cookie_secure: bool = _env_bool("APP_AUTH_COOKIE_SECURE", True)
     app_auth_cookie_samesite: str = _env_cookie_samesite("APP_AUTH_COOKIE_SAMESITE", "lax")
+    app_trust_proxy_headers: bool = _env_bool("APP_TRUST_PROXY_HEADERS", True)
+    app_trusted_proxies: list[str] = _env_csv("APP_TRUSTED_PROXIES", "*")
     app_auth_session_hours: int = _env_int("APP_AUTH_SESSION_HOURS", 12)
     app_auth_pending_minutes: int = _env_int("APP_AUTH_PENDING_MINUTES", 5)
     poller_only: bool = _env_bool("POLLER_ONLY", False)
