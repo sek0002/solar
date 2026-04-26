@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import html
+import hashlib
 import json
 import logging
 import re
@@ -35,6 +36,11 @@ tuya_client = TuyaCloudClient(settings)
 AUTH_SESSION_COOKIE = "solar_session"
 AUTH_PENDING_COOKIE = "solar_pending"
 AUTH_ATTEMPTS: dict[str, list[float]] = {}
+STATUS_CACHE_TTL_SECONDS = 5.0
+AGGREGATE_CACHE_TTL_SECONDS = 15.0
+_STATUS_CACHE: dict[str, object] = {"expires_at": 0.0, "payload": None}
+_CUMULATIVE_CACHE: dict[str, object] = {"expires_at": 0.0, "payload": None}
+_ENERGY_SUMMARY_CACHE: dict[str, object] = {"expires_at": 0.0, "payload": None}
 
 
 def _validate_auth_settings() -> None:
@@ -313,6 +319,116 @@ def _with_network_ble_placeholder(statuses: list[dict[str, object]]) -> list[dic
         },
         *statuses,
     ]
+
+
+def _latest_tuya_device_status(latest_samples: list[dict[str, object]]) -> dict[str, object] | None:
+    tuya_sample = next((item for item in latest_samples if item.get("source") == "tuya_ev"), None)
+    payload = dict(tuya_sample.get("raw_payload") or {}) if tuya_sample else {}
+    status_codes = payload.get("status_codes")
+    if not isinstance(status_codes, list):
+        return None
+    return _tuya_status_map(status_codes)
+
+
+def _get_status_payload_from_cache() -> dict[str, object] | None:
+    now_monotonic = asyncio.get_running_loop().time()
+    cached_payload = _STATUS_CACHE.get("payload")
+    cached_expires_at = float(_STATUS_CACHE.get("expires_at") or 0.0)
+    if cached_payload is not None and now_monotonic < cached_expires_at:
+        return cached_payload
+    return None
+
+
+async def _build_status_payload() -> dict[str, object]:
+    cached_payload = _get_status_payload_from_cache()
+    if cached_payload is not None:
+        return cached_payload
+
+    latest_samples = database.get_latest_samples()
+    payload = {
+        "pollers": _with_network_ble_placeholder(await coordinator.statuses.snapshot()),
+        "latest_samples": latest_samples,
+        "tuya_device_status": _latest_tuya_device_status(latest_samples),
+        "tuya_automation_enabled": settings.tuya_solar_automation_enabled,
+    }
+    _STATUS_CACHE["payload"] = payload
+    _STATUS_CACHE["expires_at"] = asyncio.get_running_loop().time() + STATUS_CACHE_TTL_SECONDS
+    return payload
+
+
+def _get_cached_payload(cache: dict[str, object]) -> dict[str, object] | None:
+    now_monotonic = asyncio.get_running_loop().time()
+    cached_payload = cache.get("payload")
+    cached_expires_at = float(cache.get("expires_at") or 0.0)
+    if cached_payload is not None and now_monotonic < cached_expires_at:
+        return cached_payload
+    return None
+
+
+def _set_cached_payload(cache: dict[str, object], payload: dict[str, object], ttl_seconds: float) -> dict[str, object]:
+    cache["payload"] = payload
+    cache["expires_at"] = asyncio.get_running_loop().time() + ttl_seconds
+    return payload
+
+
+def _canonical_json_bytes(payload: dict[str, object]) -> bytes:
+    return json.dumps(payload, separators=(",", ":"), sort_keys=True, default=str).encode("utf-8")
+
+
+def _json_etag_response(request: Request, payload: dict[str, object], *, cache_seconds: int = 15) -> Response:
+    body = _canonical_json_bytes(payload)
+    etag = hashlib.sha1(body).hexdigest()
+    if request.headers.get("if-none-match") == etag:
+        response = Response(status_code=304)
+    else:
+        response = Response(content=body, media_type="application/json")
+    response.headers["ETag"] = etag
+    response.headers["Cache-Control"] = f"private, max-age={cache_seconds}"
+    return response
+
+
+def _downsample_samples(items: list[dict[str, object]], target_points: int) -> list[dict[str, object]]:
+    if target_points <= 0 or len(items) <= target_points:
+        return items
+
+    grouped: dict[str, list[dict[str, object]]] = {}
+    for item in items:
+        grouped.setdefault(str(item.get("source") or "unknown"), []).append(item)
+
+    source_names = [source for source, source_items in grouped.items() if source_items]
+    if not source_names:
+        return items
+
+    per_source_target = max(60, target_points // max(1, len(source_names)))
+    reduced: list[dict[str, object]] = []
+    for source, source_items in grouped.items():
+        if len(source_items) <= per_source_target:
+            reduced.extend(source_items)
+            continue
+
+        bucket_size = max(1, len(source_items) // per_source_target)
+        if len(source_items) % per_source_target:
+            bucket_size += 1
+
+        for index in range(0, len(source_items), bucket_size):
+            bucket = source_items[index:index + bucket_size]
+            if not bucket:
+                continue
+            last_item = bucket[-1]
+            if source in {"ble", "local_site"}:
+                grid_values = [float(item["grid_usage_watts"]) for item in bucket if item.get("grid_usage_watts") is not None]
+                solar_values = [float(item["solar_generation_watts"]) for item in bucket if item.get("solar_generation_watts") is not None]
+                reduced.append(
+                    {
+                        **last_item,
+                        "grid_usage_watts": (sum(grid_values) / len(grid_values)) if grid_values else None,
+                        "solar_generation_watts": (sum(solar_values) / len(solar_values)) if solar_values else None,
+                    }
+                )
+            else:
+                reduced.append(last_item)
+
+    return sorted(reduced, key=lambda item: str(item.get("observed_at") or ""))
 
 
 def _format_byd_page_value(value: object, suffix: str = "") -> str:
@@ -992,6 +1108,7 @@ async def api_samples(
     limit: int = Query(default=settings.api_max_points, ge=1, le=20000),
     start: Optional[str] = Query(default=None),
     end: Optional[str] = Query(default=None),
+    target_points: Optional[int] = Query(default=None, ge=100, le=5000),
 ) -> dict[str, object]:
     if start or end:
         fallback_end = datetime.now(timezone.utc)
@@ -999,34 +1116,38 @@ async def api_samples(
         start_dt = _parse_api_datetime(start, end_dt - timedelta(hours=hours))
         if start_dt > end_dt:
             start_dt, end_dt = end_dt - timedelta(hours=hours), end_dt
-        return {"items": database.get_samples_range(since=start_dt, until=end_dt, limit=limit)}
+        items = database.get_samples_range(since=start_dt, until=end_dt, limit=limit)
+        return {"items": _downsample_samples(items, target_points or 0)}
 
-    return {"items": database.get_recent_samples(hours=hours, limit=limit)}
+    items = database.get_recent_samples(hours=hours, limit=limit)
+    return {"items": _downsample_samples(items, target_points or 0)}
 
 
 @app.get("/api/status")
 async def api_status() -> dict[str, object]:
-    tuya_device_status = None
-    try:
-        tuya_device_status = await _tuya_status_snapshot()
-    except Exception:
-        logging.exception("Unable to fetch Tuya device status for dashboard refresh")
-    return {
-        "pollers": _with_network_ble_placeholder(await coordinator.statuses.snapshot()),
-        "latest_samples": database.get_latest_samples(),
-        "tuya_device_status": tuya_device_status,
-        "tuya_automation_enabled": settings.tuya_solar_automation_enabled,
-    }
+    return await _build_status_payload()
 
 
 @app.get("/api/cumulative")
-async def api_cumulative() -> dict[str, object]:
-    return {"items": database.get_cumulative_samples()}
+async def api_cumulative(request: Request) -> Response:
+    cached_payload = _get_cached_payload(_CUMULATIVE_CACHE)
+    payload = cached_payload if cached_payload is not None else _set_cached_payload(
+        _CUMULATIVE_CACHE,
+        {"items": database.get_cumulative_samples()},
+        AGGREGATE_CACHE_TTL_SECONDS,
+    )
+    return _json_etag_response(request, payload, cache_seconds=int(AGGREGATE_CACHE_TTL_SECONDS))
 
 
 @app.get("/api/energy-summary")
-async def api_energy_summary() -> dict[str, object]:
-    return database.get_energy_summary()
+async def api_energy_summary(request: Request) -> Response:
+    cached_payload = _get_cached_payload(_ENERGY_SUMMARY_CACHE)
+    payload = cached_payload if cached_payload is not None else _set_cached_payload(
+        _ENERGY_SUMMARY_CACHE,
+        database.get_energy_summary(),
+        AGGREGATE_CACHE_TTL_SECONDS,
+    )
+    return _json_etag_response(request, payload, cache_seconds=int(AGGREGATE_CACHE_TTL_SECONDS))
 
 
 @app.post("/api/tuya/charger")

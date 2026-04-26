@@ -15,7 +15,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/static/styles.css?v={{ styles_version }}">
-  <script src="/static/vendor/chart.umd.min.js"></script>
+  <script defer src="/static/vendor/chart.umd.min.js"></script>
 </head>
 <body>
   <main class="shell">
@@ -293,6 +293,6 @@
       appVersion: "{{ static_app_version }}-{{ styles_version }}-{{ sw_version }}"
     };
   </script>
-  <script src="/static/app.js?v={{ static_app_version }}"></script>
+  <script defer src="/static/app.js?v={{ static_app_version }}"></script>
 </body>
 </html>

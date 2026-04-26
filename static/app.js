@@ -1869,6 +1869,18 @@ function getSamplesFetchLimit(hours) {
   return Math.min(hardCap, Math.max(floor, estimatedPoints));
 }
 
+function getSamplesTargetPoints(hours) {
+  const numericHours = Math.max(1, Number(hours) || 1);
+  const baseTarget = useLightweightDashboard ? 480 : 1200;
+  if (numericHours <= 6) {
+    return Math.max(240, Math.round(baseTarget * 0.75));
+  }
+  if (numericHours >= 72) {
+    return Math.max(360, Math.round(baseTarget * 0.85));
+  }
+  return baseTarget;
+}
+
 function shouldAggregateLineWindow(windowState) {
   if (!windowState || !windowState.start || !windowState.end) {
     return false;
@@ -2204,6 +2216,21 @@ function saveRefreshCache(payload) {
   }
 }
 
+function buildEmptyEnergySummary() {
+  return {
+    totals: {
+      daily: { solar: 0, grid: 0, offpeak: 0, ev: 0, net: 0 },
+      weekly: { solar: 0, grid: 0, offpeak: 0, ev: 0, net: 0 },
+      monthly: { solar: 0, grid: 0, offpeak: 0, ev: 0, net: 0 }
+    },
+    generation: {
+      hourly: { solar: {}, grid: {}, offpeak: {}, ev: {} },
+      daily: { solar: {}, grid: {}, offpeak: {}, ev: {} },
+      weekly: { solar: {}, grid: {}, offpeak: {}, ev: {} }
+    }
+  };
+}
+
 function isCachedRefreshUsable(cachedPayload, request) {
   if (!cachedPayload || !cachedPayload.request || !cachedPayload.cachedAt) {
     return false;
@@ -2321,36 +2348,43 @@ async function refresh() {
     const windowState = buildWindowState(safeStart, end);
     const request = buildRefreshRequest(hours, safeStart, end);
     const fetchLimit = getSamplesFetchLimit(hours);
-    const [statusResult, samplesResult, cumulativeResult, energySummaryResult] = await Promise.allSettled([
-      fetchJson("/api/status"),
-      fetchJson(`/api/samples?hours=${hours}&limit=${fetchLimit}&start=${encodeURIComponent(safeStart.toISOString())}&end=${encodeURIComponent(end.toISOString())}`),
+    const samplesTargetPoints = getSamplesTargetPoints(hours);
+    const cachedPayload = loadRefreshCache();
+    const fallbackItems = Array.isArray(cachedPayload && cachedPayload.items) ? cachedPayload.items : [];
+    const fallbackCumulativeSeries = cachedPayload && cachedPayload.cumulativeSeries
+      ? cachedPayload.cumulativeSeries
+      : { solar: [], grid: [], ev: [] };
+    const fallbackEnergySummary = cachedPayload && cachedPayload.energySummary
+      ? cachedPayload.energySummary
+      : buildEmptyEnergySummary();
+
+    const statusPayload = await fetchJson("/api/status");
+    renderDashboardState(
+      statusPayload,
+      fallbackItems,
+      fallbackCumulativeSeries,
+      fallbackEnergySummary,
+      windowState,
+      fallbackItems.length
+        ? `Refreshing from ${new Date().toLocaleTimeString("en-AU", { timeZone: appTimezone })}...`
+        : "Loading charts..."
+    );
+
+    const [samplesResult, cumulativeResult, energySummaryResult] = await Promise.allSettled([
+      fetchJson(`/api/samples?hours=${hours}&limit=${fetchLimit}&target_points=${samplesTargetPoints}&start=${encodeURIComponent(safeStart.toISOString())}&end=${encodeURIComponent(end.toISOString())}`),
       fetchJson("/api/cumulative"),
       fetchJson("/api/energy-summary")
     ]);
 
-    if (statusResult.status !== "fulfilled" || samplesResult.status !== "fulfilled") {
-      const statusReason = statusResult.status === "rejected" ? statusResult.reason : null;
-      const samplesReason = samplesResult.status === "rejected" ? samplesResult.reason : null;
-      throw statusReason || samplesReason || new Error("Unable to load dashboard data");
+    if (samplesResult.status !== "fulfilled") {
+      throw samplesResult.reason || new Error("Unable to load dashboard samples");
     }
 
-    const statusPayload = statusResult.value;
     const samplesPayload = samplesResult.value;
-    const cumulativePayload = cumulativeResult.status === "fulfilled" ? cumulativeResult.value : { items: { solar: [], grid: [], ev: [] } };
+    const cumulativePayload = cumulativeResult.status === "fulfilled" ? cumulativeResult.value : { items: fallbackCumulativeSeries };
     const energySummary = energySummaryResult.status === "fulfilled"
       ? energySummaryResult.value
-      : {
-          totals: {
-            daily: { solar: 0, grid: 0, offpeak: 0, ev: 0, net: 0 },
-            weekly: { solar: 0, grid: 0, offpeak: 0, ev: 0, net: 0 },
-            monthly: { solar: 0, grid: 0, offpeak: 0, ev: 0, net: 0 }
-          },
-          generation: {
-            hourly: { solar: {}, grid: {}, offpeak: {}, ev: {} },
-            daily: { solar: {}, grid: {}, offpeak: {}, ev: {} },
-            weekly: { solar: {}, grid: {}, offpeak: {}, ev: {} }
-          }
-        };
+      : fallbackEnergySummary;
     const items = Array.isArray(samplesPayload.items) ? samplesPayload.items : [];
     const cumulativeSeries = cumulativePayload && cumulativePayload.items ? cumulativePayload.items : { solar: [], grid: [], ev: [] };
 
@@ -2587,6 +2621,11 @@ chargerCurrentOptions.forEach((button) => {
 });
 
 window.addEventListener("resize", resizeCharts);
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) {
+    scheduleRefresh(0);
+  }
+});
 if ("serviceWorker" in navigator) {
   const swUrl = window.SOLAR_PWA && window.SOLAR_PWA.swUrl ? window.SOLAR_PWA.swUrl : "/sw.js";
   window.addEventListener("load", () => {
@@ -2598,4 +2637,8 @@ if ("serviceWorker" in navigator) {
 deferIframeLoad(bydSummaryFrame);
 deferIframeLoad(bydMapFrame);
 refresh();
-setInterval(refresh, useLightweightDashboard ? 45000 : 30000);
+setInterval(() => {
+  if (!document.hidden) {
+    refresh();
+  }
+}, useLightweightDashboard ? 45000 : 30000);
