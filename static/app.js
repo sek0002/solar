@@ -1722,12 +1722,14 @@ function baseChartOptions(theme) {
   };
 }
 
-function createLineChart(element, datasets, tooltipMode = "rate") {
+function createLineChart(element, datasets, tooltipMode = "rate", windowState = null) {
   if (typeof Chart === "undefined") {
     renderChartPlaceholder(element, "Chart library unavailable");
     return;
   }
   const theme = buildCanvasTheme();
+  const xMin = windowState && windowState.start ? windowState.start.getTime() : undefined;
+  const xMax = windowState && windowState.end ? windowState.end.getTime() : undefined;
   const canvas = ensureChartCanvas(element);
   const chart = new Chart(canvas, {
     type: "line",
@@ -1741,6 +1743,8 @@ function createLineChart(element, datasets, tooltipMode = "rate") {
       scales: {
         x: {
           type: "linear",
+          min: Number.isFinite(xMin) ? xMin : undefined,
+          max: Number.isFinite(xMax) ? xMax : undefined,
           grid: {
             color: theme.grid
           },
@@ -2027,7 +2031,7 @@ function renderBleSolarChart(items, windowState) {
       backgroundColor: "rgba(0,0,0,0)",
       fill: false
     }
-  ], "rate");
+  ], "rate", windowState);
 }
 
 function buildCumulativeWindowState(seriesList) {
@@ -2070,8 +2074,6 @@ function renderCumulativeChart(cumulativeSeries, windowState) {
     Array.isArray(cumulativeSeries && cumulativeSeries.ev) ? cumulativeSeries.ev : [],
     windowState
   );
-  const chartWindowState = buildCumulativeWindowState([solarKwh, gridKwh, evKwh]);
-
   if (!solarKwh.length && !gridKwh.length && !evKwh.length) {
     renderChartPlaceholder(cumulativeChartElement, "No cumulative data available");
     return;
@@ -2083,7 +2085,7 @@ function renderCumulativeChart(cumulativeSeries, windowState) {
       data: aggregateLineSeries(solarKwh.map((item) => ({
         x: toChartTime(item.observed_at).getTime(),
         y: item.cumulative_kwh
-      })), chartWindowState, 720, "last"),
+      })), windowState, 720, "last"),
       borderColor: dark ? "#8ee29d" : "#7cc98a",
       backgroundColor: dark ? "rgba(142, 226, 157, 0.14)" : "rgba(124, 201, 138, 0.12)",
       fill: true
@@ -2093,7 +2095,7 @@ function renderCumulativeChart(cumulativeSeries, windowState) {
       data: aggregateLineSeries(gridKwh.map((item) => ({
         x: toChartTime(item.observed_at).getTime(),
         y: item.cumulative_kwh
-      })), chartWindowState, 720, "last"),
+      })), windowState, 720, "last"),
       borderColor: dark ? "#7fb0ff" : "#6f96d8",
       backgroundColor: dark ? "rgba(127, 176, 255, 0.12)" : "rgba(111, 150, 216, 0.09)",
       fill: true
@@ -2103,12 +2105,12 @@ function renderCumulativeChart(cumulativeSeries, windowState) {
       data: aggregateLineSeries(evKwh.map((item) => ({
         x: toChartTime(item.observed_at).getTime(),
         y: item.cumulative_kwh
-      })), chartWindowState, 720, "last"),
+      })), windowState, 720, "last"),
       borderColor: dark ? "#ffb45b" : "#d6882e",
       backgroundColor: dark ? "rgba(255, 180, 91, 0.12)" : "rgba(214, 136, 46, 0.10)",
       fill: true
     }
-  ], "energy");
+  ], "energy", windowState);
 }
 
 function renderGenerationSummaryChart(element, totalsBySource, formatter) {
