@@ -38,9 +38,11 @@ AUTH_PENDING_COOKIE = "solar_pending"
 AUTH_ATTEMPTS: dict[str, list[float]] = {}
 STATUS_CACHE_TTL_SECONDS = 5.0
 AGGREGATE_CACHE_TTL_SECONDS = 15.0
+LIVE_TUYA_STATUS_TTL_SECONDS = 45.0
 _STATUS_CACHE: dict[str, object] = {"expires_at": 0.0, "payload": None}
 _CUMULATIVE_CACHE: dict[str, object] = {"expires_at": 0.0, "payload": None}
 _ENERGY_SUMMARY_CACHE: dict[str, object] = {"expires_at": 0.0, "payload": None}
+_LIVE_TUYA_STATUS_CACHE: dict[str, object] = {"expires_at": 0.0, "payload": None}
 
 
 def _validate_auth_settings() -> None:
@@ -330,6 +332,30 @@ def _latest_tuya_device_status(latest_samples: list[dict[str, object]]) -> dict[
     return _tuya_status_map(status_codes)
 
 
+def _invalidate_status_cache() -> None:
+    _STATUS_CACHE["payload"] = None
+    _STATUS_CACHE["expires_at"] = 0.0
+
+
+def _get_live_tuya_device_status() -> dict[str, object] | None:
+    now_monotonic = asyncio.get_running_loop().time()
+    cached_payload = _LIVE_TUYA_STATUS_CACHE.get("payload")
+    cached_expires_at = float(_LIVE_TUYA_STATUS_CACHE.get("expires_at") or 0.0)
+    if isinstance(cached_payload, dict) and now_monotonic < cached_expires_at:
+        return cached_payload
+    return None
+
+
+def _store_live_tuya_device_status(status_map: dict[str, object] | None) -> None:
+    if not isinstance(status_map, dict):
+        _LIVE_TUYA_STATUS_CACHE["payload"] = None
+        _LIVE_TUYA_STATUS_CACHE["expires_at"] = 0.0
+        return
+    _LIVE_TUYA_STATUS_CACHE["payload"] = dict(status_map)
+    _LIVE_TUYA_STATUS_CACHE["expires_at"] = asyncio.get_running_loop().time() + LIVE_TUYA_STATUS_TTL_SECONDS
+    _invalidate_status_cache()
+
+
 def _get_status_payload_from_cache() -> dict[str, object] | None:
     now_monotonic = asyncio.get_running_loop().time()
     cached_payload = _STATUS_CACHE.get("payload")
@@ -345,10 +371,11 @@ async def _build_status_payload() -> dict[str, object]:
         return cached_payload
 
     latest_samples = database.get_latest_samples()
+    live_tuya_device_status = _get_live_tuya_device_status()
     payload = {
         "pollers": _with_network_ble_placeholder(await coordinator.statuses.snapshot()),
         "latest_samples": latest_samples,
-        "tuya_device_status": _latest_tuya_device_status(latest_samples),
+        "tuya_device_status": live_tuya_device_status or _latest_tuya_device_status(latest_samples),
         "tuya_automation_enabled": settings.tuya_solar_automation_enabled,
     }
     _STATUS_CACHE["payload"] = payload
@@ -1166,6 +1193,7 @@ async def api_tuya_charger(payload: dict[str, object]) -> dict[str, object]:
                 [{"code": "switch", "value": enabled}],
             )
             status_map = await _tuya_wait_for_state(client, desired_on=enabled, timeout_seconds=10.0)
+    _store_live_tuya_device_status(status_map)
     return {"status": "ok", "enabled": enabled, "result": result.get("result"), "device_status": status_map}
 
 
@@ -1206,6 +1234,7 @@ async def api_tuya_charger_current(payload: dict[str, object]) -> dict[str, obje
                 restored_status = await _tuya_wait_for_state(client, desired_on=True, timeout_seconds=10.0)
             else:
                 restored_status = await _tuya_get_status_map(client)
+    _store_live_tuya_device_status(restored_status)
 
     return {
         "status": "ok",
@@ -1222,6 +1251,7 @@ async def api_tuya_automation(payload: dict[str, object]) -> dict[str, object]:
     if not isinstance(enabled, bool):
         raise HTTPException(status_code=400, detail="Expected boolean 'enabled' field")
     settings.tuya_solar_automation_enabled = enabled
+    _invalidate_status_cache()
     return {"status": "ok", "enabled": settings.tuya_solar_automation_enabled}
 
 
