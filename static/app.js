@@ -2263,7 +2263,7 @@ function isCachedRefreshUsable(cachedPayload, request) {
   return true;
 }
 
-function renderDashboardState(statusPayload, items, cumulativeSeries, energySummary, windowState, refreshLabel) {
+function renderDashboardChrome(statusPayload) {
   const directChargerStatus = statusPayload && typeof statusPayload.tuya_device_status === "object"
     ? statusPayload.tuya_device_status
     : null;
@@ -2282,6 +2282,10 @@ function renderDashboardState(statusPayload, items, cumulativeSeries, energySumm
   renderChargerToggle(statusPayload.latest_samples, directChargerStatus);
   renderBleBatteryState(statusPayload.pollers);
   renderEvBatteryState(statusPayload.latest_samples, statusPayload.pollers);
+}
+
+function renderDashboardState(statusPayload, items, cumulativeSeries, energySummary, windowState, refreshLabel) {
+  renderDashboardChrome(statusPayload);
 
   if (!items.length) {
     totalsTableBody.innerHTML = `
@@ -2361,16 +2365,10 @@ async function refresh() {
       : buildEmptyEnergySummary();
 
     const statusPayload = await fetchJson("/api/status");
-    renderDashboardState(
-      statusPayload,
-      fallbackItems,
-      fallbackCumulativeSeries,
-      fallbackEnergySummary,
-      windowState,
-      fallbackItems.length
-        ? `Refreshing from ${new Date().toLocaleTimeString("en-AU", { timeZone: appTimezone })}...`
-        : "Loading charts..."
-    );
+    renderDashboardChrome(statusPayload);
+    refreshText.textContent = fallbackItems.length
+      ? `Refreshing from ${new Date().toLocaleTimeString("en-AU", { timeZone: appTimezone })}...`
+      : "Loading charts...";
 
     const [samplesResult, cumulativeResult, energySummaryResult] = await Promise.allSettled([
       fetchJson(`/api/samples?hours=${hours}&limit=${fetchLimit}&target_points=${samplesTargetPoints}&start=${encodeURIComponent(safeStart.toISOString())}&end=${encodeURIComponent(end.toISOString())}`),
