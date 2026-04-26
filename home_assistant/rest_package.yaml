@@ -1,0 +1,156 @@
+rest:
+  - resource: https://solar.example.com/api/home-assistant/summary
+    scan_interval: 30
+    timeout: 15
+    headers:
+      Authorization: Bearer YOUR_HOME_ASSISTANT_API_TOKEN
+    sensor:
+      - name: Solar Monitor Summary
+        unique_id: solar_monitor_summary
+        value_template: "{{ value_json.summary.observed_at | default('unknown') }}"
+        json_attributes_path: "$.summary"
+        json_attributes:
+          - observed_at
+          - grid_kw
+          - solar_kw
+          - ev_kw
+          - ble_battery_percent
+          - ev_soc_percent
+          - ev_range_km
+          - ev_charging_state
+          - charger_on
+          - charger_work_state
+          - charger_current_amps
+          - charger_manual_override_on
+          - charger_automation_on
+          - collector_ble_state
+          - collector_byd_state
+          - daily_solar_kwh
+          - daily_grid_kwh
+          - daily_offpeak_kwh
+          - daily_ev_kwh
+          - daily_net_kwh
+          - weekly_solar_kwh
+          - weekly_grid_kwh
+          - weekly_offpeak_kwh
+          - weekly_ev_kwh
+          - weekly_net_kwh
+          - monthly_solar_kwh
+          - monthly_grid_kwh
+          - monthly_offpeak_kwh
+          - monthly_ev_kwh
+          - monthly_net_kwh
+          - cumulative_solar_kwh
+          - cumulative_grid_kwh
+          - cumulative_ev_kwh
+
+  - resource: https://solar.example.com/api/home-assistant/history?hours=24&target_points=288
+    scan_interval: 300
+    timeout: 30
+    headers:
+      Authorization: Bearer YOUR_HOME_ASSISTANT_API_TOKEN
+    sensor:
+      - name: Solar Monitor History Feed
+        unique_id: solar_monitor_history_feed
+        value_template: "{{ value_json.range.end }}"
+        json_attributes:
+          - range
+          - series
+          - cumulative
+
+template:
+  - sensor:
+      - name: Solar Grid Power
+        unique_id: solar_grid_power
+        unit_of_measurement: kW
+        device_class: power
+        state_class: measurement
+        state: "{{ state_attr('sensor.solar_monitor_summary', 'grid_kw') | float(0) }}"
+
+      - name: Solar Generation Power
+        unique_id: solar_generation_power
+        unit_of_measurement: kW
+        device_class: power
+        state_class: measurement
+        state: "{{ state_attr('sensor.solar_monitor_summary', 'solar_kw') | float(0) }}"
+
+      - name: Solar EV Charging Power
+        unique_id: solar_ev_charging_power
+        unit_of_measurement: kW
+        device_class: power
+        state_class: measurement
+        state: "{{ state_attr('sensor.solar_monitor_summary', 'ev_kw') | float(0) }}"
+
+      - name: Solar Daily Generation
+        unique_id: solar_daily_generation
+        unit_of_measurement: kWh
+        device_class: energy
+        state_class: total
+        state: "{{ state_attr('sensor.solar_monitor_summary', 'daily_solar_kwh') | float(0) }}"
+
+      - name: Solar Daily Grid
+        unique_id: solar_daily_grid
+        unit_of_measurement: kWh
+        device_class: energy
+        state_class: total
+        state: "{{ state_attr('sensor.solar_monitor_summary', 'daily_grid_kwh') | float(0) }}"
+
+      - name: Solar Daily EV
+        unique_id: solar_daily_ev
+        unit_of_measurement: kWh
+        device_class: energy
+        state_class: total
+        state: "{{ state_attr('sensor.solar_monitor_summary', 'daily_ev_kwh') | float(0) }}"
+
+      - name: Solar Daily Offpeak
+        unique_id: solar_daily_offpeak
+        unit_of_measurement: kWh
+        device_class: energy
+        state_class: total
+        state: "{{ state_attr('sensor.solar_monitor_summary', 'daily_offpeak_kwh') | float(0) }}"
+
+      - name: Solar Charger Current
+        unique_id: solar_charger_current
+        unit_of_measurement: A
+        state_class: measurement
+        state: "{{ state_attr('sensor.solar_monitor_summary', 'charger_current_amps') | float(0) }}"
+
+      - name: Solar Charger Mode
+        unique_id: solar_charger_mode
+        state: >-
+          {% if state_attr('sensor.solar_monitor_summary', 'charger_manual_override_on') %}
+            manual
+          {% elif state_attr('sensor.solar_monitor_summary', 'charger_automation_on') %}
+            auto
+          {% else %}
+            direct
+          {% endif %}
+
+      - name: Solar BLE Battery
+        unique_id: solar_ble_battery
+        unit_of_measurement: "%"
+        device_class: battery
+        state_class: measurement
+        state: "{{ state_attr('sensor.solar_monitor_summary', 'ble_battery_percent') | float(0) }}"
+
+      - name: Solar EV SoC
+        unique_id: solar_ev_soc
+        unit_of_measurement: "%"
+        device_class: battery
+        state_class: measurement
+        state: "{{ state_attr('sensor.solar_monitor_summary', 'ev_soc_percent') | float(0) }}"
+
+binary_sensor:
+  - platform: template
+    sensors:
+      solar_charger_on:
+        friendly_name: Solar Charger On
+        value_template: "{{ state_attr('sensor.solar_monitor_summary', 'charger_on') == true }}"
+
+      solar_charger_manual_override:
+        friendly_name: Solar Charger Manual Override
+        value_template: "{{ state_attr('sensor.solar_monitor_summary', 'charger_manual_override_on') == true }}"
+
+      solar_charger_automation:
+        friendly_name: Solar Charger Automation
+        value_template: "{{ state_attr('sensor.solar_monitor_summary', 'charger_automation_on') == true }}"

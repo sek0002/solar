@@ -187,6 +187,30 @@ sudo systemctl status caddy
 
 Once DNS is correct, Caddy will obtain and renew the TLS certificate automatically. Your dashboard should then be available at `https://solar.example.com`.
 
+## Home Assistant
+
+If you want Home Assistant to read Solar Monitor data and plot it on a dashboard, set a dedicated bearer token:
+
+```env
+HOME_ASSISTANT_API_TOKEN=your-long-random-token
+```
+
+The app then exposes:
+
+- `/api/home-assistant/summary`
+- `/api/home-assistant/history?hours=24&target_points=288`
+
+Use the example files in [home_assistant/README.md](/Users/sekkevin/LocalR/solar/solar/home_assistant/README.md):
+
+- [home_assistant/rest_package.yaml](/Users/sekkevin/LocalR/solar/solar/home_assistant/rest_package.yaml)
+- [home_assistant/lovelace_example.yaml](/Users/sekkevin/LocalR/solar/solar/home_assistant/lovelace_example.yaml)
+
+These let Home Assistant:
+
+- ingest current BLE / solar / EV power as sensors
+- read daily, weekly, and monthly energy totals
+- pull downsampled historical series directly from the Solar Monitor database for dashboard charts
+
 ## Service notes
 
 - The included unit file is [deploy/solar-monitor.service](/Users/sekkevin/LocalR/solar/deploy/solar-monitor.service).

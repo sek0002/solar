@@ -1,0 +1,100 @@
+type: vertical-stack
+cards:
+  - type: entities
+    title: Solar Monitor
+    entities:
+      - entity: sensor.solar_generation_power
+        name: Site solar
+      - entity: sensor.solar_grid_power
+        name: BLE grid
+      - entity: sensor.solar_ev_charging_power
+        name: BYD EV
+      - entity: sensor.solar_charger_current
+        name: Charger current
+      - entity: sensor.solar_charger_mode
+        name: Charger mode
+      - entity: binary_sensor.solar_charger_on
+        name: Charger on
+      - entity: binary_sensor.solar_charger_manual_override
+        name: Manual override
+      - entity: binary_sensor.solar_charger_automation
+        name: Automation
+      - entity: sensor.solar_ble_battery
+        name: BLE battery
+      - entity: sensor.solar_ev_soc
+        name: EV SoC
+
+  - type: history-graph
+    title: Live Power
+    hours_to_show: 24
+    entities:
+      - entity: sensor.solar_generation_power
+        name: Site solar
+      - entity: sensor.solar_grid_power
+        name: BLE grid
+      - entity: sensor.solar_ev_charging_power
+        name: BYD EV
+
+  - type: statistics-graph
+    title: Daily Energy Totals
+    chart_type: bar
+    days_to_show: 14
+    stat_types:
+      - state
+    entities:
+      - entity: sensor.solar_daily_generation
+        name: Solar
+      - entity: sensor.solar_daily_grid
+        name: Grid
+      - entity: sensor.solar_daily_ev
+        name: EV
+      - entity: sensor.solar_daily_offpeak
+        name: Off-peak
+
+  - type: custom:apexcharts-card
+    header:
+      show: true
+      title: Solar DB History
+    graph_span: 24h
+    span:
+      start: day
+    series:
+      - entity: sensor.solar_monitor_history_feed
+        name: BLE grid
+        data_generator: |
+          const points = entity.attributes.series?.grid || [];
+          return points.map((point) => [new Date(point.observed_at).getTime(), point.value_kw]);
+      - entity: sensor.solar_monitor_history_feed
+        name: Site solar
+        data_generator: |
+          const points = entity.attributes.series?.solar || [];
+          return points.map((point) => [new Date(point.observed_at).getTime(), point.value_kw]);
+      - entity: sensor.solar_monitor_history_feed
+        name: BYD EV
+        data_generator: |
+          const points = entity.attributes.series?.ev || [];
+          return points.map((point) => [new Date(point.observed_at).getTime(), point.value_kw]);
+
+  - type: custom:apexcharts-card
+    header:
+      show: true
+      title: Cumulative Energy From Solar DB
+    graph_span: 24h
+    span:
+      start: day
+    series:
+      - entity: sensor.solar_monitor_history_feed
+        name: Solar cumulative
+        data_generator: |
+          const points = entity.attributes.cumulative?.solar || [];
+          return points.map((point) => [new Date(point.observed_at).getTime(), point.cumulative_kwh]);
+      - entity: sensor.solar_monitor_history_feed
+        name: Grid cumulative
+        data_generator: |
+          const points = entity.attributes.cumulative?.grid || [];
+          return points.map((point) => [new Date(point.observed_at).getTime(), point.cumulative_kwh]);
+      - entity: sensor.solar_monitor_history_feed
+        name: EV cumulative
+        data_generator: |
+          const points = entity.attributes.cumulative?.ev || [];
+          return points.map((point) => [new Date(point.observed_at).getTime(), point.cumulative_kwh]);

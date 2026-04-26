@@ -165,6 +165,28 @@ def _auth_exempt_path(path: str) -> bool:
     return path.startswith("/static/") or path.startswith("/api/ingest/")
 
 
+def _is_home_assistant_api_path(path: str) -> bool:
+    return path.startswith("/api/home-assistant/")
+
+
+def _extract_api_token(request: Request) -> str:
+    auth_header = (request.headers.get("Authorization") or "").strip()
+    if auth_header.lower().startswith("bearer "):
+        return auth_header[7:].strip()
+    return (
+        (request.headers.get("X-Solar-Token") or "").strip()
+        or (request.query_params.get("token") or "").strip()
+    )
+
+
+def _verify_home_assistant_token(request: Request) -> bool:
+    configured_token = settings.home_assistant_api_token.strip()
+    provided_token = _extract_api_token(request)
+    if not configured_token or not provided_token:
+        return False
+    return secrets.compare_digest(provided_token, configured_token)
+
+
 def _apply_security_headers(response: Response) -> None:
     response.headers["X-Frame-Options"] = "SAMEORIGIN"
     response.headers["X-Content-Type-Options"] = "nosniff"
@@ -473,6 +495,145 @@ def _set_cached_payload(cache: dict[str, object], payload: dict[str, object], tt
     cache["payload"] = payload
     cache["expires_at"] = asyncio.get_running_loop().time() + ttl_seconds
     return payload
+
+
+def _rate_per_minute_to_kw_per_hour(value: object) -> float | None:
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return None
+    return round((numeric * 60.0) / 1000.0, 3)
+
+
+def _latest_sample_map(latest_samples: list[dict[str, object]]) -> dict[str, dict[str, object]]:
+    mapped: dict[str, dict[str, object]] = {}
+    for item in latest_samples:
+        source = item.get("source")
+        if isinstance(source, str) and source not in mapped:
+            mapped[source] = item
+    return mapped
+
+
+def _latest_observed_at(latest_samples: list[dict[str, object]]) -> str | None:
+    timestamps = [str(item.get("observed_at")) for item in latest_samples if item.get("observed_at")]
+    return max(timestamps) if timestamps else None
+
+
+def _extract_status_entry(status_payload: dict[str, object], name: str) -> dict[str, object] | None:
+    pollers = status_payload.get("pollers")
+    if not isinstance(pollers, list):
+        return None
+    return next(
+        (
+            item for item in pollers
+            if isinstance(item, dict) and item.get("name") == name
+        ),
+        None,
+    )
+
+
+def _series_points_from_samples(items: list[dict[str, object]], source: str, field_name: str) -> list[dict[str, object]]:
+    points: list[dict[str, object]] = []
+    for item in items:
+        if item.get("source") != source:
+            continue
+        value = _rate_per_minute_to_kw_per_hour(item.get(field_name))
+        observed_at = item.get("observed_at")
+        if value is None or not observed_at:
+            continue
+        points.append({
+            "observed_at": str(observed_at),
+            "value_kw": value,
+        })
+    return points
+
+
+def _latest_cumulative_value(points: list[dict[str, object]]) -> float:
+    if not points:
+        return 0.0
+    try:
+        return round(float(points[-1].get("cumulative_kwh") or 0.0), 3)
+    except (TypeError, ValueError, AttributeError):
+        return 0.0
+
+
+def _build_home_assistant_summary(
+    status_payload: dict[str, object],
+    energy_summary: dict[str, object],
+    cumulative_series: dict[str, list[dict[str, object]]],
+) -> dict[str, object]:
+    latest_samples = list(status_payload.get("latest_samples") or [])
+    latest_by_source = _latest_sample_map(latest_samples)
+    ble_sample = dict(latest_by_source.get("ble") or {})
+    solar_sample = dict(latest_by_source.get("local_site") or {})
+    byd_sample = dict(latest_by_source.get("byd_ev") or {})
+    ble_payload = dict(ble_sample.get("raw_payload") or {})
+    byd_payload = dict(byd_sample.get("raw_payload") or {})
+    tuya_status = dict(status_payload.get("tuya_device_status") or {})
+    totals = dict((energy_summary or {}).get("totals") or {})
+    daily_totals = dict(totals.get("daily") or {})
+    weekly_totals = dict(totals.get("weekly") or {})
+    monthly_totals = dict(totals.get("monthly") or {})
+    ble_status = _extract_status_entry(status_payload, "network_ble") or _extract_status_entry(status_payload, "ble")
+    byd_status = _extract_status_entry(status_payload, "byd_ev")
+
+    return {
+        "summary": {
+            "observed_at": _latest_observed_at(latest_samples),
+            "grid_kw": _rate_per_minute_to_kw_per_hour(ble_sample.get("grid_usage_watts")),
+            "solar_kw": _rate_per_minute_to_kw_per_hour(solar_sample.get("solar_generation_watts")),
+            "ev_kw": _rate_per_minute_to_kw_per_hour(byd_sample.get("grid_usage_watts")),
+            "ble_battery_percent": ble_payload.get("battery_percent"),
+            "ev_soc_percent": byd_payload.get("soc_percent"),
+            "ev_range_km": byd_payload.get("range_km"),
+            "ev_charging_state": byd_payload.get("charging_state"),
+            "charger_on": _tuya_is_on(tuya_status),
+            "charger_work_state": tuya_status.get("work_state"),
+            "charger_current_amps": _tuya_read_current(tuya_status),
+            "charger_manual_override_on": bool(status_payload.get("tuya_manual_override_enabled")),
+            "charger_automation_on": bool(status_payload.get("tuya_automation_enabled")),
+            "collector_ble_state": ble_status.get("state") if isinstance(ble_status, dict) else None,
+            "collector_byd_state": byd_status.get("state") if isinstance(byd_status, dict) else None,
+            "daily_solar_kwh": round(float(daily_totals.get("solar") or 0.0), 3),
+            "daily_grid_kwh": round(float(daily_totals.get("grid") or 0.0), 3),
+            "daily_offpeak_kwh": round(float(daily_totals.get("offpeak") or 0.0), 3),
+            "daily_ev_kwh": round(float(daily_totals.get("ev") or 0.0), 3),
+            "daily_net_kwh": round(float(daily_totals.get("net") or 0.0), 3),
+            "weekly_solar_kwh": round(float(weekly_totals.get("solar") or 0.0), 3),
+            "weekly_grid_kwh": round(float(weekly_totals.get("grid") or 0.0), 3),
+            "weekly_offpeak_kwh": round(float(weekly_totals.get("offpeak") or 0.0), 3),
+            "weekly_ev_kwh": round(float(weekly_totals.get("ev") or 0.0), 3),
+            "weekly_net_kwh": round(float(weekly_totals.get("net") or 0.0), 3),
+            "monthly_solar_kwh": round(float(monthly_totals.get("solar") or 0.0), 3),
+            "monthly_grid_kwh": round(float(monthly_totals.get("grid") or 0.0), 3),
+            "monthly_offpeak_kwh": round(float(monthly_totals.get("offpeak") or 0.0), 3),
+            "monthly_ev_kwh": round(float(monthly_totals.get("ev") or 0.0), 3),
+            "monthly_net_kwh": round(float(monthly_totals.get("net") or 0.0), 3),
+            "cumulative_solar_kwh": _latest_cumulative_value(list(cumulative_series.get("solar") or [])),
+            "cumulative_grid_kwh": _latest_cumulative_value(list(cumulative_series.get("grid") or [])),
+            "cumulative_ev_kwh": _latest_cumulative_value(list(cumulative_series.get("ev") or [])),
+        }
+    }
+
+
+def _filter_cumulative_window(
+    cumulative_series: dict[str, list[dict[str, object]]],
+    *,
+    start_iso: str,
+    end_iso: str,
+) -> dict[str, list[dict[str, object]]]:
+    filtered: dict[str, list[dict[str, object]]] = {"solar": [], "grid": [], "ev": []}
+    for key in filtered:
+        points = list(cumulative_series.get(key) or [])
+        filtered[key] = [
+            {
+                "observed_at": str(point.get("observed_at")),
+                "cumulative_kwh": round(float(point.get("cumulative_kwh") or 0.0), 3),
+            }
+            for point in points
+            if point.get("observed_at") and start_iso <= str(point.get("observed_at")) <= end_iso
+        ]
+    return filtered
 
 
 def _canonical_json_bytes(payload: dict[str, object]) -> bytes:
@@ -1048,6 +1209,15 @@ app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="stat
 
 @app.middleware("http")
 async def auth_middleware(request: Request, call_next):
+    if _is_home_assistant_api_path(request.url.path):
+        if not _verify_home_assistant_token(request):
+            response = JSONResponse({"detail": "Valid Home Assistant token required"}, status_code=401)
+            _apply_security_headers(response)
+            return response
+        response = await call_next(request)
+        _apply_security_headers(response)
+        return response
+
     if settings.app_auth_enabled and not _auth_exempt_path(request.url.path) and not _verify_session_cookie(request):
         if request.url.path.startswith("/api/"):
             response = JSONResponse({"detail": "Authentication required"}, status_code=401)
@@ -1251,6 +1421,71 @@ async def api_energy_summary(request: Request) -> Response:
         database.get_energy_summary(),
         AGGREGATE_CACHE_TTL_SECONDS,
     )
+    return _json_etag_response(request, payload, cache_seconds=int(AGGREGATE_CACHE_TTL_SECONDS))
+
+
+@app.get("/api/home-assistant/summary")
+async def api_home_assistant_summary(request: Request) -> Response:
+    status_payload = await _build_status_payload()
+    energy_summary = _get_cached_payload(_ENERGY_SUMMARY_CACHE)
+    if energy_summary is None:
+        energy_summary = _set_cached_payload(
+            _ENERGY_SUMMARY_CACHE,
+            database.get_energy_summary(),
+            AGGREGATE_CACHE_TTL_SECONDS,
+        )
+    cumulative_payload = _get_cached_payload(_CUMULATIVE_CACHE)
+    if cumulative_payload is None:
+        cumulative_payload = _set_cached_payload(
+            _CUMULATIVE_CACHE,
+            {"items": database.get_cumulative_samples()},
+            AGGREGATE_CACHE_TTL_SECONDS,
+        )
+    payload = _build_home_assistant_summary(
+        status_payload,
+        energy_summary,
+        dict(cumulative_payload.get("items") or {}),
+    )
+    return _json_etag_response(request, payload, cache_seconds=int(AGGREGATE_CACHE_TTL_SECONDS))
+
+
+@app.get("/api/home-assistant/history")
+async def api_home_assistant_history(
+    request: Request,
+    hours: int = Query(default=24, ge=1, le=168),
+    target_points: int = Query(default=288, ge=24, le=2000),
+) -> Response:
+    end_dt = datetime.now(timezone.utc)
+    start_dt = end_dt - timedelta(hours=hours)
+    limit = min(settings.api_max_points, max(target_points * 6, target_points))
+    items = database.get_samples_range(since=start_dt, until=end_dt, limit=limit)
+    downsampled_items = _downsample_samples(items, target_points)
+    cumulative_payload = _get_cached_payload(_CUMULATIVE_CACHE)
+    if cumulative_payload is None:
+        cumulative_payload = _set_cached_payload(
+            _CUMULATIVE_CACHE,
+            {"items": database.get_cumulative_samples()},
+            AGGREGATE_CACHE_TTL_SECONDS,
+        )
+    cumulative_series = dict(cumulative_payload.get("items") or {})
+    payload = {
+        "range": {
+            "hours": hours,
+            "start": start_dt.isoformat(),
+            "end": end_dt.isoformat(),
+            "target_points": target_points,
+        },
+        "series": {
+            "grid": _series_points_from_samples(downsampled_items, "ble", "grid_usage_watts"),
+            "solar": _series_points_from_samples(downsampled_items, "local_site", "solar_generation_watts"),
+            "ev": _series_points_from_samples(downsampled_items, "byd_ev", "grid_usage_watts"),
+        },
+        "cumulative": _filter_cumulative_window(
+            cumulative_series,
+            start_iso=start_dt.isoformat(),
+            end_iso=end_dt.isoformat(),
+        ),
+    }
     return _json_etag_response(request, payload, cache_seconds=int(AGGREGATE_CACHE_TTL_SECONDS))
 
 

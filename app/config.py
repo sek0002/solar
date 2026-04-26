@@ -62,6 +62,7 @@ class Settings:
     app_trusted_proxies: list[str] = field(default_factory=lambda: _env_csv("APP_TRUSTED_PROXIES", "*"))
     app_auth_session_hours: int = _env_int("APP_AUTH_SESSION_HOURS", 12)
     app_auth_pending_minutes: int = _env_int("APP_AUTH_PENDING_MINUTES", 5)
+    home_assistant_api_token: str = os.getenv("HOME_ASSISTANT_API_TOKEN", "")
     poller_only: bool = _env_bool("POLLER_ONLY", False)
     ble_site_only: bool = _env_bool("BLE_SITE_ONLY", False)
 
