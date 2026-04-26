@@ -50,6 +50,9 @@ let chargerPendingMessage = "";
 let chargerStateOverride = null;
 let automationCommandInFlight = false;
 let automationEnabledOverride = null;
+let manualOverrideEnabledOverride = null;
+let latestAutomationEnabled = false;
+let latestManualOverrideEnabled = false;
 let deferredSummaryRenderTimer = null;
 let deferredSummaryRenderIdleHandle = null;
 
@@ -652,10 +655,7 @@ function getChargerEnabledState(chargerState) {
   return chargerState.enabled;
 }
 
-function getChargerStatusLabel(chargerState, isEnabled) {
-  if (chargerCommandInFlight && chargerPendingMessage) {
-    return chargerPendingMessage;
-  }
+function getChargerActualStateLabel(chargerState, isEnabled) {
   if (!chargerState) {
     return "n/a";
   }
@@ -680,11 +680,40 @@ function getChargerStatusLabel(chargerState, isEnabled) {
   return "n/a";
 }
 
+function getChargerStatusLabel(chargerState, isEnabled, manualOverrideEnabled, automationEnabled) {
+  if (chargerCommandInFlight && chargerPendingMessage) {
+    return chargerPendingMessage;
+  }
+  if (manualOverrideEnabled) {
+    if (chargerState && Number.isFinite(chargerState.current)) {
+      return `Manual ${chargerState.current}A`;
+    }
+    return "Manual on";
+  }
+  if (automationEnabled) {
+    return isEnabled === true ? "Auto on" : "Auto off";
+  }
+  return getChargerActualStateLabel(chargerState, isEnabled);
+}
+
 function getAutomationEnabled(statusPayload) {
   if (typeof automationEnabledOverride === "boolean") {
     return automationEnabledOverride;
   }
-  return Boolean(statusPayload && statusPayload.tuya_automation_enabled);
+  if (statusPayload && typeof statusPayload.tuya_automation_enabled === "boolean") {
+    return statusPayload.tuya_automation_enabled;
+  }
+  return latestAutomationEnabled;
+}
+
+function getManualOverrideEnabled(statusPayload) {
+  if (typeof manualOverrideEnabledOverride === "boolean") {
+    return manualOverrideEnabledOverride;
+  }
+  if (statusPayload && typeof statusPayload.tuya_manual_override_enabled === "boolean") {
+    return statusPayload.tuya_manual_override_enabled;
+  }
+  return latestManualOverrideEnabled;
 }
 
 function getAutomationStatusLabel(statusPayload, isEnabled) {
@@ -699,6 +728,9 @@ function getAutomationStatusLabel(statusPayload, isEnabled) {
     : null;
   if (!details) {
     return "Auto on";
+  }
+  if (details.manual_override_active) {
+    return "Override";
   }
   if (details.offpeak_active) {
     return "Off-peak on";
@@ -741,7 +773,7 @@ function renderAutomationToggle(statusPayload) {
   }
 }
 
-function renderChargerToggle(samples, directStatus = null) {
+function renderChargerToggle(samples, directStatus = null, statusPayload = null) {
   if (!chargerToggle || !chargerToggleWrap) {
     return;
   }
@@ -758,10 +790,17 @@ function renderChargerToggle(samples, directStatus = null) {
   }
   const chargerState = getTuyaSwitchState(samples, directStatus);
   const isEnabled = getChargerEnabledState(chargerState);
-  chargerToggle.checked = isEnabled === true;
+  const manualOverrideEnabled = getManualOverrideEnabled(statusPayload);
+  const automationEnabled = getAutomationEnabled(statusPayload);
+  chargerToggle.checked = manualOverrideEnabled;
   chargerToggle.disabled = chargerCommandInFlight;
   if (chargerToggleStatus) {
-    chargerToggleStatus.textContent = getChargerStatusLabel(chargerState, isEnabled);
+    chargerToggleStatus.textContent = getChargerStatusLabel(
+      chargerState,
+      isEnabled,
+      manualOverrideEnabled,
+      automationEnabled,
+    );
   }
   chargerToggle.title = chargerToggleStatus ? chargerToggleStatus.textContent : "";
   chargerCurrentOptions.forEach((button) => {
@@ -2264,6 +2303,8 @@ function isCachedRefreshUsable(cachedPayload, request) {
 }
 
 function renderDashboardChrome(statusPayload) {
+  latestAutomationEnabled = Boolean(statusPayload && statusPayload.tuya_automation_enabled);
+  latestManualOverrideEnabled = Boolean(statusPayload && statusPayload.tuya_manual_override_enabled);
   const directChargerStatus = statusPayload && typeof statusPayload.tuya_device_status === "object"
     ? statusPayload.tuya_device_status
     : null;
@@ -2279,7 +2320,7 @@ function renderDashboardChrome(statusPayload) {
   renderTopbarGauge(statusPayload.latest_samples);
   renderBydTopbarGauge(statusPayload.latest_samples, statusPayload.pollers);
   renderAutomationToggle(statusPayload);
-  renderChargerToggle(statusPayload.latest_samples, directChargerStatus);
+  renderChargerToggle(statusPayload.latest_samples, directChargerStatus, statusPayload);
   renderBleBatteryState(statusPayload.pollers);
   renderEvBatteryState(statusPayload.latest_samples, statusPayload.pollers);
 }
@@ -2516,37 +2557,42 @@ resetRangeButton.addEventListener("click", () => {
 if (chargerToggle) {
   chargerToggle.addEventListener("change", async () => {
     const desiredState = chargerToggle.checked;
-    chargerPendingMessage = desiredState ? "switching on..." : "switching off...";
+    chargerPendingMessage = desiredState ? "manual override on..." : "manual override off...";
     const previousOverride = chargerStateOverride ? { ...chargerStateOverride } : null;
+    const previousManualOverride = manualOverrideEnabledOverride;
+    const desiredCurrent = previousOverride && Number.isFinite(previousOverride.current) ? previousOverride.current : 6;
     chargerStateOverride = {
       ...(previousOverride || {}),
-      enabled: desiredState,
-      workState: desiredState ? "charger_wait" : "charge_end",
-      current: previousOverride && previousOverride.current !== undefined ? previousOverride.current : null
+      enabled: desiredState ? true : (previousOverride ? previousOverride.enabled : null),
+      workState: desiredState ? "charger_wait" : (previousOverride ? previousOverride.workState : "charge_end"),
+      current: previousOverride && previousOverride.current !== undefined ? previousOverride.current : desiredCurrent
     };
+    manualOverrideEnabledOverride = desiredState;
     setChargerControlsBusy(true);
-    renderChargerToggle([], null);
+    renderChargerToggle([], null, null);
     try {
       const response = await fetch("/api/tuya/charger", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ enabled: desiredState })
+        body: JSON.stringify({ enabled: desiredState, current: desiredCurrent })
       });
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}`);
       }
       const payload = await response.json();
+      manualOverrideEnabledOverride = Boolean(payload.manual_override_enabled);
       setChargerStateOverrideFromDeviceStatus(payload.device_status);
-      renderChargerToggle([], null);
+      renderChargerToggle([], null, payload);
       scheduleRefresh(250);
     } catch (error) {
       console.error("Unable to update charger state", error);
       chargerToggle.checked = !desiredState;
       chargerStateOverride = previousOverride;
+      manualOverrideEnabledOverride = previousManualOverride;
     } finally {
       chargerPendingMessage = "";
       setChargerControlsBusy(false);
-      renderChargerToggle([], null);
+      renderChargerToggle([], null, null);
     }
   });
 }
@@ -2570,6 +2616,7 @@ if (automationToggle) {
       const payload = await response.json();
       automationEnabledOverride = Boolean(payload.enabled);
       renderAutomationToggle({ tuya_automation_enabled: automationEnabledOverride });
+      renderChargerToggle([], null, payload);
       scheduleRefresh(250);
     } catch (error) {
       console.error("Unable to update automation state", error);
@@ -2595,7 +2642,7 @@ chargerCurrentOptions.forEach((button) => {
       current,
     };
     setChargerControlsBusy(true);
-    renderChargerToggle([], null);
+    renderChargerToggle([], null, null);
     try {
       const response = await fetch("/api/tuya/charger/current", {
         method: "POST",
@@ -2606,8 +2653,11 @@ chargerCurrentOptions.forEach((button) => {
         throw new Error(`HTTP ${response.status}`);
       }
       const payload = await response.json();
+      if (typeof payload.manual_override_enabled === "boolean") {
+        manualOverrideEnabledOverride = payload.manual_override_enabled;
+      }
       setChargerStateOverrideFromDeviceStatus(payload.device_status);
-      renderChargerToggle([], null);
+      renderChargerToggle([], null, payload);
       scheduleRefresh(250);
     } catch (error) {
       console.error("Unable to update charger current", error);
@@ -2615,7 +2665,7 @@ chargerCurrentOptions.forEach((button) => {
     } finally {
       chargerPendingMessage = "";
       setChargerControlsBusy(false);
-      renderChargerToggle([], null);
+      renderChargerToggle([], null, null);
     }
   });
 });

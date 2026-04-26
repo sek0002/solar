@@ -131,6 +131,8 @@ class Settings:
     tuya_temperature_divisor: float = _env_float("TUYA_TEMPERATURE_DIVISOR", 10.0)
     tuya_session_energy_divisor: float = _env_float("TUYA_SESSION_ENERGY_DIVISOR", 100.0)
     tuya_solar_automation_enabled: bool = _env_bool("TUYA_SOLAR_AUTOMATION_ENABLED", False)
+    tuya_manual_override_enabled: bool = False
+    tuya_manual_override_current: int = 6
     tuya_solar_automation_poll_seconds: float = _env_float("TUYA_SOLAR_AUTOMATION_POLL_SECONDS", 30.0)
     tuya_solar_automation_window_minutes: float = _env_float("TUYA_SOLAR_AUTOMATION_WINDOW_MINUTES", 5.0)
     tuya_solar_automation_6a_watts: float = _env_float("TUYA_SOLAR_AUTOMATION_6A_WATTS", 2.0)

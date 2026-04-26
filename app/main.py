@@ -250,6 +250,15 @@ def _tuya_is_on(status_map: dict[str, object]) -> bool | None:
     return switch_value if isinstance(switch_value, bool) else None
 
 
+def _tuya_read_current(status_map: dict[str, object]) -> int | None:
+    value = status_map.get("charge_cur_set")
+    try:
+        numeric = int(float(value))
+    except (TypeError, ValueError):
+        return None
+    return numeric if numeric in {6, 10, 13} else None
+
+
 async def _tuya_get_status_map(client: httpx.AsyncClient) -> dict[str, object]:
     return _tuya_status_map(await tuya_client.get_device_status(client))
 
@@ -259,6 +268,73 @@ async def _tuya_status_snapshot() -> dict[str, object] | None:
         return None
     async with httpx.AsyncClient(timeout=settings.tuya_timeout_seconds) as client:
         return await _tuya_get_status_map(client)
+
+
+async def _tuya_set_switch_state(client: httpx.AsyncClient, *, enabled: bool) -> dict[str, object]:
+    await tuya_client.send_device_commands(
+        client,
+        [{"code": "switch", "value": enabled}],
+    )
+    return await _tuya_wait_for_state(client, desired_on=enabled, timeout_seconds=10.0)
+
+
+async def _tuya_apply_target(
+    client: httpx.AsyncClient,
+    *,
+    desired_enabled: bool | None,
+    desired_current: int | None,
+) -> dict[str, object]:
+    initial_status = await _tuya_get_status_map(client)
+    is_on = _tuya_is_on(initial_status)
+    current_value = _tuya_read_current(initial_status)
+
+    if desired_enabled is False:
+        if is_on is True:
+            final_status = await _tuya_set_switch_state(client, enabled=False)
+            return {
+                "action": "switched_off",
+                "device_status": final_status,
+                "result": True,
+            }
+        return {
+            "action": "unchanged_off",
+            "device_status": initial_status,
+            "result": True,
+        }
+
+    if desired_enabled is not True or desired_current not in {6, 10, 13}:
+        return {
+            "action": "no_change",
+            "device_status": initial_status,
+            "result": True,
+        }
+
+    if is_on is True and current_value == desired_current:
+        return {
+            "action": "unchanged_on",
+            "device_status": initial_status,
+            "result": True,
+        }
+
+    command_result: object = True
+    if is_on is True:
+        await _tuya_set_switch_state(client, enabled=False)
+        await asyncio.sleep(1.0)
+
+    if current_value != desired_current:
+        response = await tuya_client.send_device_commands(
+            client,
+            [{"code": "charge_cur_set", "value": desired_current}],
+        )
+        command_result = response.get("result")
+        await asyncio.sleep(1.0)
+
+    final_status = await _tuya_set_switch_state(client, enabled=True)
+    return {
+        "action": "set_current_and_on" if current_value != desired_current else "switched_on",
+        "device_status": final_status,
+        "result": command_result,
+    }
 
 
 async def _tuya_wait_for_state(
@@ -377,6 +453,7 @@ async def _build_status_payload() -> dict[str, object]:
         "latest_samples": latest_samples,
         "tuya_device_status": live_tuya_device_status or _latest_tuya_device_status(latest_samples),
         "tuya_automation_enabled": settings.tuya_solar_automation_enabled,
+        "tuya_manual_override_enabled": settings.tuya_manual_override_enabled,
     }
     _STATUS_CACHE["payload"] = payload
     _STATUS_CACHE["expires_at"] = asyncio.get_running_loop().time() + STATUS_CACHE_TTL_SECONDS
@@ -1186,15 +1263,52 @@ async def api_tuya_charger(payload: dict[str, object]) -> dict[str, object]:
     if not isinstance(enabled, bool):
         raise HTTPException(status_code=400, detail="Expected boolean 'enabled' field")
 
+    current_value = payload.get("current")
+    desired_current = None
+    if current_value is not None:
+        if not isinstance(current_value, int) or current_value not in {6, 10, 13}:
+            raise HTTPException(status_code=400, detail="Expected integer 'current' field with value 6, 10, or 13")
+        desired_current = current_value
+
+    settings.tuya_manual_override_enabled = enabled
+
     async with tuya_command_lock:
         async with httpx.AsyncClient(timeout=settings.tuya_timeout_seconds) as client:
-            result = await tuya_client.send_device_commands(
-                client,
-                [{"code": "switch", "value": enabled}],
-            )
-            status_map = await _tuya_wait_for_state(client, desired_on=enabled, timeout_seconds=10.0)
+            initial_status = await _tuya_get_status_map(client)
+            initial_current = _tuya_read_current(initial_status)
+            target_current = desired_current or initial_current or settings.tuya_manual_override_current or 6
+            if target_current not in {6, 10, 13}:
+                target_current = 6
+            settings.tuya_manual_override_current = target_current
+
+            status_map = initial_status
+            result: object | None = True
+            if enabled:
+                action = await _tuya_apply_target(
+                    client,
+                    desired_enabled=True,
+                    desired_current=target_current,
+                )
+                status_map = dict(action.get("device_status") or initial_status)
+                result = action.get("result")
+            else:
+                if not settings.tuya_solar_automation_enabled and _tuya_is_on(initial_status) is True:
+                    action = await _tuya_apply_target(
+                        client,
+                        desired_enabled=False,
+                        desired_current=None,
+                    )
+                    status_map = dict(action.get("device_status") or initial_status)
+                    result = action.get("result")
     _store_live_tuya_device_status(status_map)
-    return {"status": "ok", "enabled": enabled, "result": result.get("result"), "device_status": status_map}
+    return {
+        "status": "ok",
+        "enabled": enabled,
+        "manual_override_enabled": settings.tuya_manual_override_enabled,
+        "current": settings.tuya_manual_override_current,
+        "result": result,
+        "device_status": status_map,
+    }
 
 
 @app.post("/api/tuya/charger/current")
@@ -1205,42 +1319,36 @@ async def api_tuya_charger_current(payload: dict[str, object]) -> dict[str, obje
     current = payload.get("current")
     if not isinstance(current, int) or current not in {6, 10, 13}:
         raise HTTPException(status_code=400, detail="Expected integer 'current' field with value 6, 10, or 13")
+    settings.tuya_manual_override_current = current
 
     async with tuya_command_lock:
         async with httpx.AsyncClient(timeout=settings.tuya_timeout_seconds) as client:
             initial_status = await _tuya_get_status_map(client)
-            was_on = _tuya_is_on(initial_status) is True
-
+            was_on = _tuya_is_on(initial_status) is True or settings.tuya_manual_override_enabled
             if was_on:
-                await tuya_client.send_device_commands(
+                action = await _tuya_apply_target(
                     client,
-                    [{"code": "switch", "value": False}],
+                    desired_enabled=True,
+                    desired_current=current,
                 )
-                await _tuya_wait_for_state(client, desired_on=False, timeout_seconds=10.0)
-                await asyncio.sleep(1.0)
-
-            result = await tuya_client.send_device_commands(
-                client,
-                [{"code": "charge_cur_set", "value": current}],
-            )
-            await asyncio.sleep(1.0)
-
-            restored_status: dict[str, object] | None = None
-            if was_on:
-                await tuya_client.send_device_commands(
-                    client,
-                    [{"code": "switch", "value": True}],
-                )
-                restored_status = await _tuya_wait_for_state(client, desired_on=True, timeout_seconds=10.0)
+                restored_status = dict(action.get("device_status") or initial_status)
+                result = action.get("result")
             else:
+                response = await tuya_client.send_device_commands(
+                    client,
+                    [{"code": "charge_cur_set", "value": current}],
+                )
+                await asyncio.sleep(1.0)
                 restored_status = await _tuya_get_status_map(client)
+                result = response.get("result")
     _store_live_tuya_device_status(restored_status)
 
     return {
         "status": "ok",
         "current": current,
-        "result": result.get("result"),
+        "result": result,
         "was_on": was_on,
+        "manual_override_enabled": settings.tuya_manual_override_enabled,
         "device_status": restored_status,
     }
 
@@ -1252,7 +1360,11 @@ async def api_tuya_automation(payload: dict[str, object]) -> dict[str, object]:
         raise HTTPException(status_code=400, detail="Expected boolean 'enabled' field")
     settings.tuya_solar_automation_enabled = enabled
     _invalidate_status_cache()
-    return {"status": "ok", "enabled": settings.tuya_solar_automation_enabled}
+    return {
+        "status": "ok",
+        "enabled": settings.tuya_solar_automation_enabled,
+        "manual_override_enabled": settings.tuya_manual_override_enabled,
+    }
 
 
 def _check_ingest_token(token: Optional[str]) -> None:

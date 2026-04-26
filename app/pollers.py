@@ -1107,6 +1107,24 @@ class TuyaSolarChargingAutomation:
         async with httpx.AsyncClient(timeout=self.settings.tuya_timeout_seconds) as client:
             while not self._stopped.is_set():
                 try:
+                    if self.settings.tuya_manual_override_enabled:
+                        evaluation = {
+                            "mode": "target",
+                            "reason": "Manual override active",
+                            "target_enabled": True,
+                            "target_current": self._manual_override_current(),
+                            "manual_override_active": True,
+                        }
+                        action = await self._apply_target(client, evaluation)
+                        await self.statuses.update(
+                            "tuya_automation",
+                            state="connected",
+                            mark_success=True,
+                            details={**evaluation, **action},
+                        )
+                        await asyncio.sleep(self.settings.tuya_solar_automation_poll_seconds)
+                        continue
+
                     if not self.settings.tuya_solar_automation_enabled:
                         self._ble_guard_hold_until = None
                         await self.statuses.update(
@@ -1480,6 +1498,10 @@ class TuyaSolarChargingAutomation:
     @staticmethod
     def _rate_per_minute_to_kw_per_hour(value: float) -> float:
         return (float(value) * 60.0) / 1000.0
+
+    def _manual_override_current(self) -> int:
+        current = int(getattr(self.settings, "tuya_manual_override_current", 6) or 6)
+        return current if current in {6, 10, 13} else 6
 
 
 
