@@ -557,6 +557,37 @@ def _latest_cumulative_value(points: list[dict[str, object]]) -> float:
         return 0.0
 
 
+def _current_hour_totals(energy_summary: dict[str, object]) -> dict[str, float]:
+    generation = dict((energy_summary or {}).get("generation") or {})
+    hourly = dict(generation.get("hourly") or {})
+    solar_map = dict(hourly.get("solar") or {})
+    latest_bucket_key = max(solar_map.keys()) if solar_map else None
+    if not latest_bucket_key:
+        grid_map = dict(hourly.get("grid") or {})
+        latest_bucket_key = max(grid_map.keys()) if grid_map else None
+    if not latest_bucket_key:
+        offpeak_map = dict(hourly.get("offpeak") or {})
+        latest_bucket_key = max(offpeak_map.keys()) if offpeak_map else None
+    if not latest_bucket_key:
+        ev_map = dict(hourly.get("ev") or {})
+        latest_bucket_key = max(ev_map.keys()) if ev_map else None
+
+    if not latest_bucket_key:
+        return {"solar": 0.0, "grid": 0.0, "offpeak": 0.0, "ev": 0.0, "net": 0.0}
+
+    solar = round(float(dict(hourly.get("solar") or {}).get(latest_bucket_key) or 0.0), 3)
+    grid = round(float(dict(hourly.get("grid") or {}).get(latest_bucket_key) or 0.0), 3)
+    offpeak = round(float(dict(hourly.get("offpeak") or {}).get(latest_bucket_key) or 0.0), 3)
+    ev = round(float(dict(hourly.get("ev") or {}).get(latest_bucket_key) or 0.0), 3)
+    return {
+        "solar": solar,
+        "grid": grid,
+        "offpeak": offpeak,
+        "ev": ev,
+        "net": round(solar - grid - offpeak, 3),
+    }
+
+
 def _build_home_assistant_summary(
     status_payload: dict[str, object],
     energy_summary: dict[str, object],
@@ -571,6 +602,7 @@ def _build_home_assistant_summary(
     byd_payload = dict(byd_sample.get("raw_payload") or {})
     tuya_status = dict(status_payload.get("tuya_device_status") or {})
     totals = dict((energy_summary or {}).get("totals") or {})
+    hourly_totals = _current_hour_totals(energy_summary)
     daily_totals = dict(totals.get("daily") or {})
     weekly_totals = dict(totals.get("weekly") or {})
     monthly_totals = dict(totals.get("monthly") or {})
@@ -594,6 +626,11 @@ def _build_home_assistant_summary(
             "charger_automation_on": bool(status_payload.get("tuya_automation_enabled")),
             "collector_ble_state": ble_status.get("state") if isinstance(ble_status, dict) else None,
             "collector_byd_state": byd_status.get("state") if isinstance(byd_status, dict) else None,
+            "hourly_solar_kwh": round(float(hourly_totals.get("solar") or 0.0), 3),
+            "hourly_grid_kwh": round(float(hourly_totals.get("grid") or 0.0), 3),
+            "hourly_offpeak_kwh": round(float(hourly_totals.get("offpeak") or 0.0), 3),
+            "hourly_ev_kwh": round(float(hourly_totals.get("ev") or 0.0), 3),
+            "hourly_net_kwh": round(float(hourly_totals.get("net") or 0.0), 3),
             "daily_solar_kwh": round(float(daily_totals.get("solar") or 0.0), 3),
             "daily_grid_kwh": round(float(daily_totals.get("grid") or 0.0), 3),
             "daily_offpeak_kwh": round(float(daily_totals.get("offpeak") or 0.0), 3),

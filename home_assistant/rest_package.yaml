@@ -7,7 +7,7 @@ rest:
     sensor:
       - name: Solar Monitor Summary
         unique_id: solar_monitor_summary
-        value_template: "{{ value_json.summary.observed_at | default('unknown') }}"
+        value_template: "{{ value_json.get('summary', {}).get('observed_at', 'unknown') }}"
         json_attributes_path: "$.summary"
         json_attributes:
           - observed_at
@@ -25,6 +25,11 @@ rest:
           - charger_automation_on
           - collector_ble_state
           - collector_byd_state
+          - hourly_solar_kwh
+          - hourly_grid_kwh
+          - hourly_offpeak_kwh
+          - hourly_ev_kwh
+          - hourly_net_kwh
           - daily_solar_kwh
           - daily_grid_kwh
           - daily_offpeak_kwh
@@ -52,7 +57,7 @@ rest:
     sensor:
       - name: Solar Monitor History Feed
         unique_id: solar_monitor_history_feed
-        value_template: "{{ value_json.range.end }}"
+        value_template: "{{ value_json.get('range', {}).get('end', 'unknown') }}"
         json_attributes:
           - range
           - series
@@ -87,6 +92,34 @@ template:
         device_class: energy
         state_class: total
         state: "{{ state_attr('sensor.solar_monitor_summary', 'daily_solar_kwh') | float(0) }}"
+
+      - name: Solar Hourly Generation
+        unique_id: solar_hourly_generation
+        unit_of_measurement: kWh
+        device_class: energy
+        state_class: total
+        state: "{{ state_attr('sensor.solar_monitor_summary', 'hourly_solar_kwh') | float(0) }}"
+
+      - name: Solar Hourly Grid
+        unique_id: solar_hourly_grid
+        unit_of_measurement: kWh
+        device_class: energy
+        state_class: total
+        state: "{{ state_attr('sensor.solar_monitor_summary', 'hourly_grid_kwh') | float(0) }}"
+
+      - name: Solar Hourly EV
+        unique_id: solar_hourly_ev
+        unit_of_measurement: kWh
+        device_class: energy
+        state_class: total
+        state: "{{ state_attr('sensor.solar_monitor_summary', 'hourly_ev_kwh') | float(0) }}"
+
+      - name: Solar Hourly Offpeak
+        unique_id: solar_hourly_offpeak
+        unit_of_measurement: kWh
+        device_class: energy
+        state_class: total
+        state: "{{ state_attr('sensor.solar_monitor_summary', 'hourly_offpeak_kwh') | float(0) }}"
 
       - name: Solar Daily Grid
         unique_id: solar_daily_grid
@@ -140,17 +173,15 @@ template:
         state_class: measurement
         state: "{{ state_attr('sensor.solar_monitor_summary', 'ev_soc_percent') | float(0) }}"
 
-binary_sensor:
-  - platform: template
-    sensors:
-      solar_charger_on:
-        friendly_name: Solar Charger On
-        value_template: "{{ state_attr('sensor.solar_monitor_summary', 'charger_on') == true }}"
+  - binary_sensor:
+      - name: Solar Charger On
+        unique_id: solar_charger_on
+        state: "{{ state_attr('sensor.solar_monitor_summary', 'charger_on') == true }}"
 
-      solar_charger_manual_override:
-        friendly_name: Solar Charger Manual Override
-        value_template: "{{ state_attr('sensor.solar_monitor_summary', 'charger_manual_override_on') == true }}"
+      - name: Solar Charger Manual Override
+        unique_id: solar_charger_manual_override
+        state: "{{ state_attr('sensor.solar_monitor_summary', 'charger_manual_override_on') == true }}"
 
-      solar_charger_automation:
-        friendly_name: Solar Charger Automation
-        value_template: "{{ state_attr('sensor.solar_monitor_summary', 'charger_automation_on') == true }}"
+      - name: Solar Charger Automation
+        unique_id: solar_charger_automation
+        state: "{{ state_attr('sensor.solar_monitor_summary', 'charger_automation_on') == true }}"
