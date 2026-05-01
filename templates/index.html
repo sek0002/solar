@@ -116,6 +116,44 @@
                   </span>
                   <span id="automation-toggle-status" class="charger-toggle-status">Auto off</span>
                 </label>
+                <details id="automation-policy-wrap" class="charger-toggle-segment automation-policy-wrap">
+                  <summary id="automation-policy-summary" class="automation-policy-summary">
+                    <span class="charger-toggle-mini-label">Policies</span>
+                    <span id="automation-policy-status" class="charger-toggle-status">3 on</span>
+                  </summary>
+                  <div class="automation-policy-list">
+                    <label class="automation-policy-item">
+                      <span class="automation-policy-copy">
+                        <span class="automation-policy-name">Solar surplus</span>
+                        <span class="automation-policy-help">2kW / 3kW / 4kW charger ramp</span>
+                      </span>
+                      <span class="charger-toggle-control automation-policy-control">
+                        <input id="automation-policy-solar" type="checkbox" aria-label="Enable solar surplus automation policy">
+                        <span class="charger-toggle-track"></span>
+                      </span>
+                    </label>
+                    <label class="automation-policy-item">
+                      <span class="automation-policy-copy">
+                        <span class="automation-policy-name">Off-peak</span>
+                        <span class="automation-policy-help">Midnight to 6am scheduled charging</span>
+                      </span>
+                      <span class="charger-toggle-control automation-policy-control">
+                        <input id="automation-policy-offpeak" type="checkbox" aria-label="Enable off-peak automation policy">
+                        <span class="charger-toggle-track"></span>
+                      </span>
+                    </label>
+                    <label class="automation-policy-item">
+                      <span class="automation-policy-copy">
+                        <span class="automation-policy-name">BLE guard</span>
+                        <span class="automation-policy-help">Blocks charging on sustained high grid import</span>
+                      </span>
+                      <span class="charger-toggle-control automation-policy-control">
+                        <input id="automation-policy-ble" type="checkbox" aria-label="Enable BLE grid guard automation policy">
+                        <span class="charger-toggle-track"></span>
+                      </span>
+                    </label>
+                  </div>
+                </details>
                 <div id="charger-current-wrap" class="charger-toggle-segment charger-current-segment">
                   <span class="charger-toggle-mini-label">Current</span>
                   <div class="charger-current-options" role="group" aria-label="Charging current">

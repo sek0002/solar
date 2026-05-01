@@ -457,6 +457,70 @@ body {
   background: color-mix(in srgb, var(--accent) 78%, white 6%);
 }
 
+.automation-policy-wrap {
+  min-width: 172px;
+}
+
+.automation-policy-summary {
+  display: grid;
+  gap: 3px;
+  list-style: none;
+  cursor: pointer;
+  user-select: none;
+}
+
+.automation-policy-summary::-webkit-details-marker {
+  display: none;
+}
+
+.automation-policy-wrap[open] .automation-policy-summary {
+  margin-bottom: 8px;
+}
+
+.automation-policy-list {
+  display: grid;
+  gap: 8px;
+  padding: 9px 10px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--panel) 90%, transparent);
+  box-shadow: var(--shadow);
+}
+
+.automation-policy-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+}
+
+.automation-policy-copy {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.automation-policy-name {
+  font-size: 0.76rem;
+  font-weight: 600;
+  color: var(--text);
+  line-height: 1.1;
+}
+
+.automation-policy-help {
+  font-size: 0.62rem;
+  color: var(--muted);
+  line-height: 1.2;
+}
+
+.automation-policy-control {
+  justify-self: end;
+}
+
+.automation-policy-wrap .charger-toggle-status {
+  text-align: left;
+}
+
 .charger-toggle-status {
   font-size: 0.66rem;
   color: var(--muted);

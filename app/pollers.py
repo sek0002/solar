@@ -38,6 +38,83 @@ def watts_to_rate_per_minute(value: Optional[float]) -> Optional[float]:
     return float(value) / 60.0
 
 
+def _coerce_optional_bool(value: object) -> Optional[bool]:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return None
+    text = str(value).strip().lower()
+    if text in {"true", "1", "yes", "on"}:
+        return True
+    if text in {"false", "0", "no", "off"}:
+        return False
+    return None
+
+
+def _parse_sample_observed_at(value: object) -> Optional[datetime]:
+    if value in {None, ""}:
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def evaluate_byd_vehicle_connection_gate(database: Database, settings: Settings) -> dict[str, Any]:
+    latest_samples = database.get_latest_samples()
+    byd_sample = next((item for item in latest_samples if item.get("source") == "byd_ev"), None)
+    if not byd_sample:
+        return {
+            "allowed": False,
+            "is_connected": False,
+            "reason": "No BYD EV sample available",
+            "observed_at": None,
+        }
+
+    payload = dict(byd_sample.get("raw_payload") or {})
+    is_connected = _coerce_optional_bool(payload.get("is_connected"))
+    if is_connected is None and _coerce_optional_bool(payload.get("is_charging")) is True:
+        is_connected = True
+
+    observed_at = _parse_sample_observed_at(byd_sample.get("observed_at"))
+    max_sample_age_seconds = max(300.0, float(settings.byd_poll_seconds) * 2.5)
+    age_seconds = None
+    if observed_at is not None:
+        age_seconds = max(0.0, (datetime.now(timezone.utc) - observed_at).total_seconds())
+        if age_seconds > max_sample_age_seconds:
+            return {
+                "allowed": False,
+                "is_connected": False,
+                "reason": "BYD EV plug-in state is stale",
+                "observed_at": observed_at.isoformat(),
+                "age_seconds": round(age_seconds, 1),
+                "max_sample_age_seconds": round(max_sample_age_seconds, 1),
+                "charging_state": payload.get("charging_state"),
+            }
+
+    if is_connected is not True:
+        return {
+            "allowed": False,
+            "is_connected": False,
+            "reason": "BYD EV plug-in not detected",
+            "observed_at": observed_at.isoformat() if observed_at is not None else None,
+            "age_seconds": round(age_seconds, 1) if age_seconds is not None else None,
+            "charging_state": payload.get("charging_state"),
+        }
+
+    return {
+        "allowed": True,
+        "is_connected": True,
+        "reason": "BYD EV plug-in detected",
+        "observed_at": observed_at.isoformat() if observed_at is not None else None,
+        "age_seconds": round(age_seconds, 1) if age_seconds is not None else None,
+        "charging_state": payload.get("charging_state"),
+    }
+
+
 @dataclass
 class PollerStatus:
     name: str
@@ -1118,7 +1195,7 @@ class TuyaSolarChargingAutomation:
                         action = await self._apply_target(client, evaluation)
                         await self.statuses.update(
                             "tuya_automation",
-                            state="connected",
+                            state="waiting" if action.get("action") == "blocked_byd_unplugged" else "connected",
                             mark_success=True,
                             details={**evaluation, **action},
                         )
@@ -1163,7 +1240,7 @@ class TuyaSolarChargingAutomation:
                         action = await self._apply_target(client, evaluation)
                         await self.statuses.update(
                             "tuya_automation",
-                            state="connected",
+                            state="waiting" if action.get("action") == "blocked_byd_unplugged" else "connected",
                             mark_success=True,
                             details={**evaluation, **action},
                         )
@@ -1208,6 +1285,15 @@ class TuyaSolarChargingAutomation:
         ble_guard = self._evaluate_ble_guard(now_utc)
         if ble_guard is not None:
             return ble_guard
+
+        if not getattr(self.settings, "tuya_solar_surplus_policy_enabled", True):
+            return {
+                "mode": "waiting",
+                "reason": "Solar surplus policy is off",
+                "target_enabled": None,
+                "target_current": None,
+                "solar_surplus_policy_enabled": False,
+            }
 
         window_minutes = max(1.0, float(self.settings.tuya_solar_automation_window_minutes))
         since = now_utc - timedelta(minutes=window_minutes)
@@ -1299,6 +1385,8 @@ class TuyaSolarChargingAutomation:
         }
 
     def _evaluate_ble_guard(self, now_utc: datetime) -> dict[str, Any] | None:
+        if not getattr(self.settings, "tuya_ble_guard_enabled", True):
+            return None
         if self._ble_guard_hold_until is not None and now_utc < self._ble_guard_hold_until:
             return {
                 "mode": "target",
@@ -1376,6 +1464,14 @@ class TuyaSolarChargingAutomation:
     async def _apply_target(self, client: httpx.AsyncClient, evaluation: dict[str, Any]) -> dict[str, Any]:
         desired_enabled = evaluation.get("target_enabled")
         desired_current = evaluation.get("target_current")
+        byd_gate = evaluate_byd_vehicle_connection_gate(self.database, self.settings)
+        if not byd_gate.get("allowed"):
+            return {
+                "action": "blocked_byd_unplugged",
+                "device_status": None,
+                "byd_vehicle_gate": byd_gate,
+                "blocked_reason": byd_gate.get("reason"),
+            }
         async with tuya_command_lock:
             initial_status = self._status_map(await self._client.get_device_status(client))
             is_on = self._is_on(initial_status)

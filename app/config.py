@@ -134,6 +134,7 @@ class Settings:
     tuya_solar_automation_enabled: bool = _env_bool("TUYA_SOLAR_AUTOMATION_ENABLED", False)
     tuya_manual_override_enabled: bool = False
     tuya_manual_override_current: int = 6
+    tuya_solar_surplus_policy_enabled: bool = _env_bool("TUYA_SOLAR_SURPLUS_POLICY_ENABLED", True)
     tuya_solar_automation_poll_seconds: float = _env_float("TUYA_SOLAR_AUTOMATION_POLL_SECONDS", 30.0)
     tuya_solar_automation_window_minutes: float = _env_float("TUYA_SOLAR_AUTOMATION_WINDOW_MINUTES", 5.0)
     tuya_solar_automation_6a_watts: float = _env_float("TUYA_SOLAR_AUTOMATION_6A_WATTS", 2.0)
@@ -142,6 +143,7 @@ class Settings:
     tuya_offpeak_charge_enabled: bool = _env_bool("TUYA_OFFPEAK_CHARGE_ENABLED", True)
     tuya_offpeak_start_hour: int = _env_int("TUYA_OFFPEAK_START_HOUR", 0)
     tuya_offpeak_end_hour: int = _env_int("TUYA_OFFPEAK_END_HOUR", 6)
+    tuya_ble_guard_enabled: bool = _env_bool("TUYA_BLE_GUARD_ENABLED", True)
     tuya_ble_guard_watts: float = _env_float("TUYA_BLE_GUARD_WATTS", 2.0)
     tuya_ble_guard_window_minutes: float = _env_float("TUYA_BLE_GUARD_WINDOW_MINUTES", 15.0)
     tuya_ble_guard_cooldown_minutes: float = _env_float("TUYA_BLE_GUARD_COOLDOWN_MINUTES", 30.0)

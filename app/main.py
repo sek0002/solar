@@ -22,7 +22,12 @@ from fastapi.templating import Jinja2Templates
 from app.auth import create_signed_token, verify_password, verify_signed_token, verify_totp
 from app.config import settings
 from app.database import Database
-from app.pollers import PollingCoordinator, TuyaCloudClient, tuya_command_lock
+from app.pollers import (
+    PollingCoordinator,
+    TuyaCloudClient,
+    evaluate_byd_vehicle_connection_gate,
+    tuya_command_lock,
+)
 
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -430,6 +435,11 @@ def _latest_tuya_device_status(latest_samples: list[dict[str, object]]) -> dict[
     return _tuya_status_map(status_codes)
 
 
+def _current_tuya_device_status() -> dict[str, object] | None:
+    latest_samples = database.get_latest_samples()
+    return _get_live_tuya_device_status() or _latest_tuya_device_status(latest_samples)
+
+
 def _invalidate_status_cache() -> None:
     _STATUS_CACHE["payload"] = None
     _STATUS_CACHE["expires_at"] = 0.0
@@ -475,6 +485,11 @@ async def _build_status_payload() -> dict[str, object]:
         "latest_samples": latest_samples,
         "tuya_device_status": live_tuya_device_status or _latest_tuya_device_status(latest_samples),
         "tuya_automation_enabled": settings.tuya_solar_automation_enabled,
+        "tuya_automation_policies": {
+            "solar_surplus": bool(settings.tuya_solar_surplus_policy_enabled),
+            "offpeak": bool(settings.tuya_offpeak_charge_enabled),
+            "ble_guard": bool(settings.tuya_ble_guard_enabled),
+        },
         "tuya_manual_override_enabled": settings.tuya_manual_override_enabled,
     }
     _STATUS_CACHE["payload"] = payload
@@ -1542,16 +1557,31 @@ async def api_tuya_charger(payload: dict[str, object]) -> dict[str, object]:
             raise HTTPException(status_code=400, detail="Expected integer 'current' field with value 6, 10, or 13")
         desired_current = current_value
 
+    target_current = desired_current or settings.tuya_manual_override_current or 6
+    if target_current not in {6, 10, 13}:
+        target_current = 6
+    settings.tuya_manual_override_current = target_current
     settings.tuya_manual_override_enabled = enabled
+
+    byd_gate = evaluate_byd_vehicle_connection_gate(database, settings)
+    if not byd_gate.get("allowed"):
+        return {
+            "status": "blocked" if enabled else "ok",
+            "enabled": enabled,
+            "manual_override_enabled": settings.tuya_manual_override_enabled,
+            "current": settings.tuya_manual_override_current,
+            "result": False,
+            "device_status": _current_tuya_device_status(),
+            "byd_vehicle_gate": byd_gate,
+        }
 
     async with tuya_command_lock:
         async with httpx.AsyncClient(timeout=settings.tuya_timeout_seconds) as client:
             initial_status = await _tuya_get_status_map(client)
             initial_current = _tuya_read_current(initial_status)
-            target_current = desired_current or initial_current or settings.tuya_manual_override_current or 6
-            if target_current not in {6, 10, 13}:
-                target_current = 6
-            settings.tuya_manual_override_current = target_current
+            if desired_current is None and initial_current in {6, 10, 13}:
+                target_current = initial_current
+                settings.tuya_manual_override_current = target_current
 
             status_map = initial_status
             result: object | None = True
@@ -1580,6 +1610,7 @@ async def api_tuya_charger(payload: dict[str, object]) -> dict[str, object]:
         "current": settings.tuya_manual_override_current,
         "result": result,
         "device_status": status_map,
+        "byd_vehicle_gate": byd_gate,
     }
 
 
@@ -1592,6 +1623,18 @@ async def api_tuya_charger_current(payload: dict[str, object]) -> dict[str, obje
     if not isinstance(current, int) or current not in {6, 10, 13}:
         raise HTTPException(status_code=400, detail="Expected integer 'current' field with value 6, 10, or 13")
     settings.tuya_manual_override_current = current
+
+    byd_gate = evaluate_byd_vehicle_connection_gate(database, settings)
+    if not byd_gate.get("allowed"):
+        return {
+            "status": "blocked",
+            "current": current,
+            "result": False,
+            "was_on": None,
+            "manual_override_enabled": settings.tuya_manual_override_enabled,
+            "device_status": _current_tuya_device_status(),
+            "byd_vehicle_gate": byd_gate,
+        }
 
     async with tuya_command_lock:
         async with httpx.AsyncClient(timeout=settings.tuya_timeout_seconds) as client:
@@ -1622,19 +1665,46 @@ async def api_tuya_charger_current(payload: dict[str, object]) -> dict[str, obje
         "was_on": was_on,
         "manual_override_enabled": settings.tuya_manual_override_enabled,
         "device_status": restored_status,
+        "byd_vehicle_gate": byd_gate,
     }
 
 
 @app.post("/api/tuya/automation")
 async def api_tuya_automation(payload: dict[str, object]) -> dict[str, object]:
     enabled = payload.get("enabled")
-    if not isinstance(enabled, bool):
+    if enabled is not None and not isinstance(enabled, bool):
         raise HTTPException(status_code=400, detail="Expected boolean 'enabled' field")
-    settings.tuya_solar_automation_enabled = enabled
+
+    policies = payload.get("policies")
+    if policies is not None and not isinstance(policies, dict):
+        raise HTTPException(status_code=400, detail="Expected object 'policies' field")
+
+    if isinstance(enabled, bool):
+        settings.tuya_solar_automation_enabled = enabled
+
+    if isinstance(policies, dict):
+        if "solar_surplus" in policies:
+            if not isinstance(policies.get("solar_surplus"), bool):
+                raise HTTPException(status_code=400, detail="Expected boolean 'policies.solar_surplus' field")
+            settings.tuya_solar_surplus_policy_enabled = bool(policies.get("solar_surplus"))
+        if "offpeak" in policies:
+            if not isinstance(policies.get("offpeak"), bool):
+                raise HTTPException(status_code=400, detail="Expected boolean 'policies.offpeak' field")
+            settings.tuya_offpeak_charge_enabled = bool(policies.get("offpeak"))
+        if "ble_guard" in policies:
+            if not isinstance(policies.get("ble_guard"), bool):
+                raise HTTPException(status_code=400, detail="Expected boolean 'policies.ble_guard' field")
+            settings.tuya_ble_guard_enabled = bool(policies.get("ble_guard"))
+
     _invalidate_status_cache()
     return {
         "status": "ok",
         "enabled": settings.tuya_solar_automation_enabled,
+        "policies": {
+            "solar_surplus": bool(settings.tuya_solar_surplus_policy_enabled),
+            "offpeak": bool(settings.tuya_offpeak_charge_enabled),
+            "ble_guard": bool(settings.tuya_ble_guard_enabled),
+        },
         "manual_override_enabled": settings.tuya_manual_override_enabled,
     }
 
