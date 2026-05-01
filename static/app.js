@@ -18,11 +18,6 @@ const chargerToggleStatus = document.querySelector("#charger-toggle-status");
 const automationToggle = document.querySelector("#automation-toggle");
 const automationToggleWrap = document.querySelector("#automation-toggle-wrap");
 const automationToggleStatus = document.querySelector("#automation-toggle-status");
-const automationPolicyWrap = document.querySelector("#automation-policy-wrap");
-const automationPolicyStatus = document.querySelector("#automation-policy-status");
-const automationPolicySolar = document.querySelector("#automation-policy-solar");
-const automationPolicyOffpeak = document.querySelector("#automation-policy-offpeak");
-const automationPolicyBle = document.querySelector("#automation-policy-ble");
 const chargerCurrentWrap = document.querySelector("#charger-current-wrap");
 const chargerCurrentOptions = Array.from(document.querySelectorAll(".charger-current-option"));
 const topbarGauge = document.querySelector("#topbar-gauge");
@@ -55,15 +50,9 @@ let chargerPendingMessage = "";
 let chargerStateOverride = null;
 let automationCommandInFlight = false;
 let automationEnabledOverride = null;
-let automationPoliciesOverride = null;
 let manualOverrideEnabledOverride = null;
 let latestAutomationEnabled = false;
 let latestManualOverrideEnabled = false;
-let latestAutomationPolicies = {
-  solar_surplus: true,
-  offpeak: true,
-  ble_guard: true
-};
 let deferredSummaryRenderTimer = null;
 let deferredSummaryRenderIdleHandle = null;
 
@@ -180,11 +169,6 @@ function setAutomationControlBusy(isBusy) {
   if (automationToggle) {
     automationToggle.disabled = isBusy;
   }
-  [automationPolicySolar, automationPolicyOffpeak, automationPolicyBle].forEach((toggle) => {
-    if (toggle) {
-      toggle.disabled = isBusy;
-    }
-  });
 }
 
 function resetVersionedClientCache() {
@@ -722,23 +706,6 @@ function getAutomationEnabled(statusPayload) {
   return latestAutomationEnabled;
 }
 
-function getAutomationPolicies(statusPayload) {
-  if (automationPoliciesOverride && typeof automationPoliciesOverride === "object") {
-    return automationPoliciesOverride;
-  }
-  const policies = statusPayload && statusPayload.tuya_automation_policies && typeof statusPayload.tuya_automation_policies === "object"
-    ? statusPayload.tuya_automation_policies
-    : null;
-  if (!policies) {
-    return latestAutomationPolicies;
-  }
-  return {
-    solar_surplus: Boolean(policies && policies.solar_surplus),
-    offpeak: Boolean(policies && policies.offpeak),
-    ble_guard: Boolean(policies && policies.ble_guard)
-  };
-}
-
 function getManualOverrideEnabled(statusPayload) {
   if (typeof manualOverrideEnabledOverride === "boolean") {
     return manualOverrideEnabledOverride;
@@ -795,37 +762,14 @@ function renderAutomationToggle(statusPayload) {
   }
   if (!tuyaControlEnabled) {
     automationToggleWrap.hidden = true;
-    if (automationPolicyWrap) {
-      automationPolicyWrap.hidden = true;
-    }
     return;
   }
   automationToggleWrap.hidden = false;
-  if (automationPolicyWrap) {
-    automationPolicyWrap.hidden = false;
-  }
   const isEnabled = getAutomationEnabled(statusPayload);
   automationToggle.checked = isEnabled;
   automationToggle.disabled = automationCommandInFlight;
   if (automationToggleStatus) {
     automationToggleStatus.textContent = getAutomationStatusLabel(statusPayload, isEnabled);
-  }
-  const policies = getAutomationPolicies(statusPayload);
-  const enabledCount = [policies.solar_surplus, policies.offpeak, policies.ble_guard].filter(Boolean).length;
-  if (automationPolicySolar) {
-    automationPolicySolar.checked = Boolean(policies.solar_surplus);
-    automationPolicySolar.disabled = automationCommandInFlight;
-  }
-  if (automationPolicyOffpeak) {
-    automationPolicyOffpeak.checked = Boolean(policies.offpeak);
-    automationPolicyOffpeak.disabled = automationCommandInFlight;
-  }
-  if (automationPolicyBle) {
-    automationPolicyBle.checked = Boolean(policies.ble_guard);
-    automationPolicyBle.disabled = automationCommandInFlight;
-  }
-  if (automationPolicyStatus) {
-    automationPolicyStatus.textContent = `${enabledCount} on`;
   }
 }
 
@@ -2361,7 +2305,6 @@ function isCachedRefreshUsable(cachedPayload, request) {
 function renderDashboardChrome(statusPayload) {
   latestAutomationEnabled = Boolean(statusPayload && statusPayload.tuya_automation_enabled);
   latestManualOverrideEnabled = Boolean(statusPayload && statusPayload.tuya_manual_override_enabled);
-  latestAutomationPolicies = getAutomationPolicies(statusPayload);
   const directChargerStatus = statusPayload && typeof statusPayload.tuya_device_status === "object"
     ? statusPayload.tuya_device_status
     : null;
@@ -2658,7 +2601,6 @@ if (automationToggle) {
   automationToggle.addEventListener("change", async () => {
     const desiredState = automationToggle.checked;
     const previousOverride = automationEnabledOverride;
-    const previousPoliciesOverride = automationPoliciesOverride;
     automationEnabledOverride = desiredState;
     setAutomationControlBusy(true);
     renderAutomationToggle(null);
@@ -2673,85 +2615,19 @@ if (automationToggle) {
       }
       const payload = await response.json();
       automationEnabledOverride = Boolean(payload.enabled);
-      automationPoliciesOverride = payload.policies && typeof payload.policies === "object"
-        ? payload.policies
-        : previousPoliciesOverride;
-      renderAutomationToggle({
-        tuya_automation_enabled: automationEnabledOverride,
-        tuya_automation_policies: automationPoliciesOverride
-      });
+      renderAutomationToggle({ tuya_automation_enabled: automationEnabledOverride });
       renderChargerToggle([], null, payload);
       scheduleRefresh(250);
     } catch (error) {
       console.error("Unable to update automation state", error);
       automationEnabledOverride = previousOverride;
-      automationPoliciesOverride = previousPoliciesOverride;
       automationToggle.checked = !desiredState;
     } finally {
       setAutomationControlBusy(false);
-      renderAutomationToggle({
-        tuya_automation_enabled: getAutomationEnabled({ tuya_automation_enabled: automationEnabledOverride }),
-        tuya_automation_policies: getAutomationPolicies({ tuya_automation_policies: automationPoliciesOverride })
-      });
+      renderAutomationToggle({ tuya_automation_enabled: getAutomationEnabled({ tuya_automation_enabled: automationEnabledOverride }) });
     }
   });
 }
-
-async function updateAutomationPolicies(nextPolicies) {
-  const previousOverride = automationPoliciesOverride;
-  automationPoliciesOverride = { ...getAutomationPolicies(null), ...nextPolicies };
-  setAutomationControlBusy(true);
-  renderAutomationToggle(null);
-  try {
-    const response = await fetch("/api/tuya/automation", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ policies: automationPoliciesOverride })
-    });
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
-    }
-    const payload = await response.json();
-    automationEnabledOverride = Boolean(payload.enabled);
-    automationPoliciesOverride = payload.policies && typeof payload.policies === "object"
-      ? payload.policies
-      : automationPoliciesOverride;
-    renderAutomationToggle({
-      tuya_automation_enabled: automationEnabledOverride,
-      tuya_automation_policies: automationPoliciesOverride
-    });
-    renderChargerToggle([], null, payload);
-    scheduleRefresh(250);
-  } catch (error) {
-    console.error("Unable to update automation policies", error);
-    automationPoliciesOverride = previousOverride;
-    throw error;
-  } finally {
-    setAutomationControlBusy(false);
-    renderAutomationToggle({
-      tuya_automation_enabled: getAutomationEnabled({ tuya_automation_enabled: automationEnabledOverride }),
-      tuya_automation_policies: getAutomationPolicies({ tuya_automation_policies: automationPoliciesOverride })
-    });
-  }
-}
-
-[
-  [automationPolicySolar, "solar_surplus"],
-  [automationPolicyOffpeak, "offpeak"],
-  [automationPolicyBle, "ble_guard"]
-].forEach(([toggle, policyName]) => {
-  if (!toggle) {
-    return;
-  }
-  toggle.addEventListener("change", async () => {
-    const desiredState = toggle.checked;
-    try {
-      await updateAutomationPolicies({ [policyName]: desiredState });
-    } catch (error) {
-      toggle.checked = !desiredState;
-    }
-  });
-});
 
 chargerCurrentOptions.forEach((button) => {
   button.addEventListener("click", async () => {

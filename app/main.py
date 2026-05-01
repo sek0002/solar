@@ -485,11 +485,6 @@ async def _build_status_payload() -> dict[str, object]:
         "latest_samples": latest_samples,
         "tuya_device_status": live_tuya_device_status or _latest_tuya_device_status(latest_samples),
         "tuya_automation_enabled": settings.tuya_solar_automation_enabled,
-        "tuya_automation_policies": {
-            "solar_surplus": bool(settings.tuya_solar_surplus_policy_enabled),
-            "offpeak": bool(settings.tuya_offpeak_charge_enabled),
-            "ble_guard": bool(settings.tuya_ble_guard_enabled),
-        },
         "tuya_manual_override_enabled": settings.tuya_manual_override_enabled,
     }
     _STATUS_CACHE["payload"] = payload
@@ -1672,39 +1667,13 @@ async def api_tuya_charger_current(payload: dict[str, object]) -> dict[str, obje
 @app.post("/api/tuya/automation")
 async def api_tuya_automation(payload: dict[str, object]) -> dict[str, object]:
     enabled = payload.get("enabled")
-    if enabled is not None and not isinstance(enabled, bool):
+    if not isinstance(enabled, bool):
         raise HTTPException(status_code=400, detail="Expected boolean 'enabled' field")
-
-    policies = payload.get("policies")
-    if policies is not None and not isinstance(policies, dict):
-        raise HTTPException(status_code=400, detail="Expected object 'policies' field")
-
-    if isinstance(enabled, bool):
-        settings.tuya_solar_automation_enabled = enabled
-
-    if isinstance(policies, dict):
-        if "solar_surplus" in policies:
-            if not isinstance(policies.get("solar_surplus"), bool):
-                raise HTTPException(status_code=400, detail="Expected boolean 'policies.solar_surplus' field")
-            settings.tuya_solar_surplus_policy_enabled = bool(policies.get("solar_surplus"))
-        if "offpeak" in policies:
-            if not isinstance(policies.get("offpeak"), bool):
-                raise HTTPException(status_code=400, detail="Expected boolean 'policies.offpeak' field")
-            settings.tuya_offpeak_charge_enabled = bool(policies.get("offpeak"))
-        if "ble_guard" in policies:
-            if not isinstance(policies.get("ble_guard"), bool):
-                raise HTTPException(status_code=400, detail="Expected boolean 'policies.ble_guard' field")
-            settings.tuya_ble_guard_enabled = bool(policies.get("ble_guard"))
-
+    settings.tuya_solar_automation_enabled = enabled
     _invalidate_status_cache()
     return {
         "status": "ok",
         "enabled": settings.tuya_solar_automation_enabled,
-        "policies": {
-            "solar_surplus": bool(settings.tuya_solar_surplus_policy_enabled),
-            "offpeak": bool(settings.tuya_offpeak_charge_enabled),
-            "ble_guard": bool(settings.tuya_ble_guard_enabled),
-        },
         "manual_override_enabled": settings.tuya_manual_override_enabled,
     }
 

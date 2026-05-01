@@ -1286,15 +1286,6 @@ class TuyaSolarChargingAutomation:
         if ble_guard is not None:
             return ble_guard
 
-        if not getattr(self.settings, "tuya_solar_surplus_policy_enabled", True):
-            return {
-                "mode": "waiting",
-                "reason": "Solar surplus policy is off",
-                "target_enabled": None,
-                "target_current": None,
-                "solar_surplus_policy_enabled": False,
-            }
-
         window_minutes = max(1.0, float(self.settings.tuya_solar_automation_window_minutes))
         since = now_utc - timedelta(minutes=window_minutes)
         local_site_samples = [
@@ -1385,8 +1376,6 @@ class TuyaSolarChargingAutomation:
         }
 
     def _evaluate_ble_guard(self, now_utc: datetime) -> dict[str, Any] | None:
-        if not getattr(self.settings, "tuya_ble_guard_enabled", True):
-            return None
         if self._ble_guard_hold_until is not None and now_utc < self._ble_guard_hold_until:
             return {
                 "mode": "target",
