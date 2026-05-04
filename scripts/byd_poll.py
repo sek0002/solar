@@ -162,25 +162,22 @@ def main() -> int:
         return 1
 
     env = os.environ.copy()
-    pybyd_error: str | None = None
-    if (env.get("BYD_PYTHON_BIN") or "").strip():
-        try:
-            payload = _run_pybyd_helper(env)
-            print(json.dumps(payload))
-            return 0
-        except Exception as exc:
-            pybyd_error = str(exc)
-
     byd_re_dir = Path(os.getenv("BYD_RE_DIR", "/opt/byd-re")).expanduser()
     node_bin = os.getenv("BYD_NODE_BIN", "node")
     client_path = byd_re_dir / "client.js"
     status_path = byd_re_dir / "status.html"
+    pybyd_error: str | None = None
 
     if not client_path.exists():
-        if pybyd_error:
-            print(json.dumps({"error": f"pyBYD failed: {pybyd_error}; BYD-re client not found at {client_path}"}))
-        else:
-            print(json.dumps({"error": f"BYD-re client not found at {client_path}"}))
+        if (env.get("BYD_PYTHON_BIN") or "").strip():
+            try:
+                payload = _run_pybyd_helper(env)
+                print(json.dumps(payload))
+                return 0
+            except Exception as exc:
+                print(json.dumps({"error": f"BYD-re client not found at {client_path}; pyBYD failed: {exc}"}))
+                return 1
+        print(json.dumps({"error": f"BYD-re client not found at {client_path}"}))
         return 1
 
     try:
@@ -193,10 +190,15 @@ def main() -> int:
             check=False,
         )
     except FileNotFoundError:
-        if pybyd_error:
-            print(json.dumps({"error": f"pyBYD failed: {pybyd_error}; Node executable not found: {node_bin}"}))
-        else:
-            print(json.dumps({"error": f"Node executable not found: {node_bin}"}))
+        if (env.get("BYD_PYTHON_BIN") or "").strip():
+            try:
+                payload = _run_pybyd_helper(env)
+                print(json.dumps(payload))
+                return 0
+            except Exception as exc:
+                print(json.dumps({"error": f"Node executable not found: {node_bin}; pyBYD failed: {exc}"}))
+                return 1
+        print(json.dumps({"error": f"Node executable not found: {node_bin}"}))
         return 1
 
     stdout_text = (result.stdout or "").strip()
@@ -205,26 +207,47 @@ def main() -> int:
     if result.returncode != 0:
         message = stderr_text or stdout_text or f"BYD-re client exited with code {result.returncode}"
         final_line = message.splitlines()[-1].strip()
+        if (env.get("BYD_PYTHON_BIN") or "").strip():
+            try:
+                payload = _run_pybyd_helper(env)
+                print(json.dumps(payload))
+                return 0
+            except Exception as exc:
+                pybyd_error = str(exc)
         if pybyd_error:
-            print(json.dumps({"error": f"pyBYD failed: {pybyd_error}; BYD-re failed: {final_line}"}))
-        else:
-            print(json.dumps({"error": final_line}))
+            print(json.dumps({"error": f"BYD-re failed: {final_line}; pyBYD failed: {pybyd_error}"}))
+            return 1
+        print(json.dumps({"error": final_line}))
         return 1
 
     if not status_path.exists():
+        if (env.get("BYD_PYTHON_BIN") or "").strip():
+            try:
+                payload = _run_pybyd_helper(env)
+                print(json.dumps(payload))
+                return 0
+            except Exception as exc:
+                pybyd_error = str(exc)
         if pybyd_error:
-            print(json.dumps({"error": f"pyBYD failed: {pybyd_error}; BYD-re did not produce status.html at {status_path}"}))
-        else:
-            print(json.dumps({"error": f"BYD-re did not produce status.html at {status_path}"}))
+            print(json.dumps({"error": f"BYD-re did not produce status.html at {status_path}; pyBYD failed: {pybyd_error}"}))
+            return 1
+        print(json.dumps({"error": f"BYD-re did not produce status.html at {status_path}"}))
         return 1
 
     try:
         data, generated_at = _extract_data_from_status_html(status_path.read_text(encoding="utf-8"))
     except Exception as exc:
+        if (env.get("BYD_PYTHON_BIN") or "").strip():
+            try:
+                payload = _run_pybyd_helper(env)
+                print(json.dumps(payload))
+                return 0
+            except Exception as fallback_exc:
+                pybyd_error = str(fallback_exc)
         if pybyd_error:
-            print(json.dumps({"error": f"pyBYD failed: {pybyd_error}; Unable to parse BYD-re output: {exc}"}))
-        else:
-            print(json.dumps({"error": f"Unable to parse BYD-re output: {exc}"}))
+            print(json.dumps({"error": f"Unable to parse BYD-re output: {exc}; pyBYD failed: {pybyd_error}"}))
+            return 1
+        print(json.dumps({"error": f"Unable to parse BYD-re output: {exc}"}))
         return 1
 
     requested_vin = (os.getenv("BYD_VIN") or "").strip()

@@ -109,7 +109,9 @@ BYD_ENABLED=true
 BYD_PYTHON_BIN=/opt/solar-monitor/.venv-byd/bin/python
 ```
 
-If `BYD_PYTHON_BIN` is set and that interpreter has `pyBYD` installed, the poller will try a patched `pyBYD` login flow first. This includes the AU login payload/signature fix discussed in [pyBYD PR #29](https://github.com/jkaberg/pyBYD/pull/29). If that path is unavailable, the app falls back to the existing `byd-re` `client.js` flow.
+The poller now prefers the existing `byd-re` `client.js` flow first. If `BYD_PYTHON_BIN` is set and that interpreter has `pyBYD` installed, it falls back to a patched `pyBYD` login flow when `byd-re` fails.
+
+For `byd-re`, update the checkout to include upstream commit `60be05e` (`fix: derive BYD imei md5 from username`). That change avoids the all-zero IMEI MD5 on newer AU login flows. If you are still on an older `byd-re`, you can temporarily set `BYD_IMEI_MD5` yourself.
 
 In that mode, the webapp fetches the BLE text page just like the solar/local site fetch path, stores the reading as `ble`, and shows a `network_ble` collector status card.
 
