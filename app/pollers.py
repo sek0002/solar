@@ -63,13 +63,19 @@ def _parse_sample_observed_at(value: object) -> Optional[datetime]:
     return parsed.astimezone(timezone.utc)
 
 
-def evaluate_byd_vehicle_connection_gate(database: Database, settings: Settings) -> dict[str, Any]:
+def evaluate_byd_vehicle_connection_gate(
+    database: Database,
+    settings: Settings,
+    *,
+    require_not_full: bool = False,
+) -> dict[str, Any]:
     latest_samples = database.get_latest_samples()
     byd_sample = next((item for item in latest_samples if item.get("source") == "byd_ev"), None)
     if not byd_sample:
         return {
             "allowed": False,
             "is_connected": False,
+            "soc_percent": None,
             "reason": "No BYD EV sample available",
             "observed_at": None,
         }
@@ -78,6 +84,11 @@ def evaluate_byd_vehicle_connection_gate(database: Database, settings: Settings)
     is_connected = _coerce_optional_bool(payload.get("is_connected"))
     if is_connected is None and _coerce_optional_bool(payload.get("is_charging")) is True:
         is_connected = True
+    soc_value = payload.get("soc_percent")
+    try:
+        soc_percent = float(soc_value) if soc_value not in (None, "") else None
+    except (TypeError, ValueError):
+        soc_percent = None
 
     observed_at = _parse_sample_observed_at(byd_sample.get("observed_at"))
     max_sample_age_seconds = max(300.0, float(settings.byd_poll_seconds) * 2.5)
@@ -88,6 +99,7 @@ def evaluate_byd_vehicle_connection_gate(database: Database, settings: Settings)
             return {
                 "allowed": False,
                 "is_connected": False,
+                "soc_percent": soc_percent,
                 "reason": "BYD EV plug-in state is stale",
                 "observed_at": observed_at.isoformat(),
                 "age_seconds": round(age_seconds, 1),
@@ -99,7 +111,19 @@ def evaluate_byd_vehicle_connection_gate(database: Database, settings: Settings)
         return {
             "allowed": False,
             "is_connected": False,
+            "soc_percent": soc_percent,
             "reason": "BYD EV plug-in not detected",
+            "observed_at": observed_at.isoformat() if observed_at is not None else None,
+            "age_seconds": round(age_seconds, 1) if age_seconds is not None else None,
+            "charging_state": payload.get("charging_state"),
+        }
+
+    if require_not_full and soc_percent is not None and soc_percent >= 100.0:
+        return {
+            "allowed": False,
+            "is_connected": True,
+            "soc_percent": soc_percent,
+            "reason": "BYD EV battery already full",
             "observed_at": observed_at.isoformat() if observed_at is not None else None,
             "age_seconds": round(age_seconds, 1) if age_seconds is not None else None,
             "charging_state": payload.get("charging_state"),
@@ -108,6 +132,7 @@ def evaluate_byd_vehicle_connection_gate(database: Database, settings: Settings)
     return {
         "allowed": True,
         "is_connected": True,
+        "soc_percent": soc_percent,
         "reason": "BYD EV plug-in detected",
         "observed_at": observed_at.isoformat() if observed_at is not None else None,
         "age_seconds": round(age_seconds, 1) if age_seconds is not None else None,
@@ -1195,7 +1220,7 @@ class TuyaSolarChargingAutomation:
                         action = await self._apply_target(client, evaluation)
                         await self.statuses.update(
                             "tuya_automation",
-                            state="waiting" if action.get("action") == "blocked_byd_unplugged" else "connected",
+                            state="waiting" if str(action.get("action", "")).startswith("blocked_byd_") else "connected",
                             mark_success=True,
                             details={**evaluation, **action},
                         )
@@ -1240,7 +1265,7 @@ class TuyaSolarChargingAutomation:
                         action = await self._apply_target(client, evaluation)
                         await self.statuses.update(
                             "tuya_automation",
-                            state="waiting" if action.get("action") == "blocked_byd_unplugged" else "connected",
+                            state="waiting" if str(action.get("action", "")).startswith("blocked_byd_") else "connected",
                             mark_success=True,
                             details={**evaluation, **action},
                         )
@@ -1453,10 +1478,14 @@ class TuyaSolarChargingAutomation:
     async def _apply_target(self, client: httpx.AsyncClient, evaluation: dict[str, Any]) -> dict[str, Any]:
         desired_enabled = evaluation.get("target_enabled")
         desired_current = evaluation.get("target_current")
-        byd_gate = evaluate_byd_vehicle_connection_gate(self.database, self.settings)
+        byd_gate = evaluate_byd_vehicle_connection_gate(
+            self.database,
+            self.settings,
+            require_not_full=True,
+        )
         if not byd_gate.get("allowed"):
             return {
-                "action": "blocked_byd_unplugged",
+                "action": "blocked_byd_vehicle_gate",
                 "device_status": None,
                 "byd_vehicle_gate": byd_gate,
                 "blocked_reason": byd_gate.get("reason"),
