@@ -106,7 +106,10 @@ NETWORK_BLE_ENABLED=true
 NETWORK_BLE_URL=http://<pi-ip>:8002/
 LOCAL_SITE_ENABLED=true
 BYD_ENABLED=true
+BYD_PYTHON_BIN=/opt/solar-monitor/.venv-byd/bin/python
 ```
+
+If `BYD_PYTHON_BIN` is set and that interpreter has `pyBYD` installed, the poller will try a patched `pyBYD` login flow first. This includes the AU login payload/signature fix discussed in [pyBYD PR #29](https://github.com/jkaberg/pyBYD/pull/29). If that path is unavailable, the app falls back to the existing `byd-re` `client.js` flow.
 
 In that mode, the webapp fetches the BLE text page just like the solar/local site fetch path, stores the reading as `ble`, and shows a `network_ble` collector status card.
 

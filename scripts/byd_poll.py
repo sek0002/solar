@@ -113,6 +113,39 @@ def _extract_data_from_status_html(status_html: str) -> tuple[dict[str, Any], An
     return data, generated_at
 
 
+def _run_pybyd_helper(env: dict[str, str]) -> dict[str, Any]:
+    byd_python_bin = (env.get("BYD_PYTHON_BIN") or "").strip()
+    if not byd_python_bin:
+        raise RuntimeError("BYD_PYTHON_BIN is not configured")
+
+    helper_path = Path(__file__).with_name("byd_poll_pybyd.py")
+    if not helper_path.exists():
+        raise RuntimeError(f"pyBYD helper not found at {helper_path}")
+
+    result = subprocess.run(
+        [byd_python_bin, str(helper_path)],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    stdout_text = (result.stdout or "").strip()
+    stderr_text = (result.stderr or "").strip()
+    if result.returncode != 0:
+        message = stderr_text or stdout_text or f"pyBYD helper exited with code {result.returncode}"
+        final_line = message.splitlines()[-1].strip()
+        raise RuntimeError(final_line)
+
+    try:
+        payload = json.loads(stdout_text)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"Invalid pyBYD helper JSON: {exc}") from exc
+
+    if payload.get("error"):
+        raise RuntimeError(str(payload["error"]))
+    return payload
+
+
 def _derive_flags(vehicle_info: dict[str, Any]) -> tuple[bool, bool]:
     charge_state = str(_pick_first(vehicle_info.get("chargingState"), vehicle_info.get("chargeState")) or "").strip().lower()
     connect_state = str(vehicle_info.get("connectState") or "").strip().lower()
@@ -128,16 +161,28 @@ def main() -> int:
         print(json.dumps({"error": "BYD_USERNAME and BYD_PASSWORD are required"}))
         return 1
 
+    env = os.environ.copy()
+    pybyd_error: str | None = None
+    if (env.get("BYD_PYTHON_BIN") or "").strip():
+        try:
+            payload = _run_pybyd_helper(env)
+            print(json.dumps(payload))
+            return 0
+        except Exception as exc:
+            pybyd_error = str(exc)
+
     byd_re_dir = Path(os.getenv("BYD_RE_DIR", "/opt/byd-re")).expanduser()
     node_bin = os.getenv("BYD_NODE_BIN", "node")
     client_path = byd_re_dir / "client.js"
     status_path = byd_re_dir / "status.html"
 
     if not client_path.exists():
-        print(json.dumps({"error": f"BYD-re client not found at {client_path}"}))
+        if pybyd_error:
+            print(json.dumps({"error": f"pyBYD failed: {pybyd_error}; BYD-re client not found at {client_path}"}))
+        else:
+            print(json.dumps({"error": f"BYD-re client not found at {client_path}"}))
         return 1
 
-    env = os.environ.copy()
     try:
         result = subprocess.run(
             [node_bin, str(client_path)],
@@ -148,7 +193,10 @@ def main() -> int:
             check=False,
         )
     except FileNotFoundError:
-        print(json.dumps({"error": f"Node executable not found: {node_bin}"}))
+        if pybyd_error:
+            print(json.dumps({"error": f"pyBYD failed: {pybyd_error}; Node executable not found: {node_bin}"}))
+        else:
+            print(json.dumps({"error": f"Node executable not found: {node_bin}"}))
         return 1
 
     stdout_text = (result.stdout or "").strip()
@@ -157,17 +205,26 @@ def main() -> int:
     if result.returncode != 0:
         message = stderr_text or stdout_text or f"BYD-re client exited with code {result.returncode}"
         final_line = message.splitlines()[-1].strip()
-        print(json.dumps({"error": final_line}))
+        if pybyd_error:
+            print(json.dumps({"error": f"pyBYD failed: {pybyd_error}; BYD-re failed: {final_line}"}))
+        else:
+            print(json.dumps({"error": final_line}))
         return 1
 
     if not status_path.exists():
-        print(json.dumps({"error": f"BYD-re did not produce status.html at {status_path}"}))
+        if pybyd_error:
+            print(json.dumps({"error": f"pyBYD failed: {pybyd_error}; BYD-re did not produce status.html at {status_path}"}))
+        else:
+            print(json.dumps({"error": f"BYD-re did not produce status.html at {status_path}"}))
         return 1
 
     try:
         data, generated_at = _extract_data_from_status_html(status_path.read_text(encoding="utf-8"))
     except Exception as exc:
-        print(json.dumps({"error": f"Unable to parse BYD-re output: {exc}"}))
+        if pybyd_error:
+            print(json.dumps({"error": f"pyBYD failed: {pybyd_error}; Unable to parse BYD-re output: {exc}"}))
+        else:
+            print(json.dumps({"error": f"Unable to parse BYD-re output: {exc}"}))
         return 1
 
     requested_vin = (os.getenv("BYD_VIN") or "").strip()
@@ -179,7 +236,7 @@ def main() -> int:
 
     vehicle_info = data.get("vehicleInfo") or {}
     gps_info = data.get("gps") or {}
-    timezone_name = os.getenv("TIMEZONE", "Australia/Melbourne")
+    timezone_name = os.getenv("BYD_TIME_ZONE") or os.getenv("TIMEZONE", "Australia/Melbourne")
 
     soc_percent = _pick_first(vehicle_info.get("elecPercent"), vehicle_info.get("powerBattery"))
     range_km = _pick_first(vehicle_info.get("enduranceMileage"), vehicle_info.get("evEndurance"))
