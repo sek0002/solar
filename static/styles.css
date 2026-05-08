@@ -543,6 +543,10 @@ body {
   min-width: 0;
 }
 
+.controls-inline-primary {
+  align-items: flex-start;
+}
+
 .controls-inline-secondary {
   gap: 6px;
 }
@@ -571,6 +575,107 @@ label {
   gap: 8px;
   min-width: 120px;
   max-width: 100%;
+}
+
+.window-panel {
+  position: relative;
+  min-width: min(100%, 320px);
+  max-width: 100%;
+}
+
+.window-panel-toggle {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 11px 14px;
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  background: var(--panel);
+  color: var(--text);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(8px);
+  font: inherit;
+  cursor: pointer;
+}
+
+.window-panel-toggle-copy {
+  display: grid;
+  gap: 3px;
+  text-align: left;
+  min-width: 0;
+}
+
+.window-panel-toggle-label {
+  font-size: 0.74rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.window-panel-summary {
+  font-size: 0.98rem;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.window-panel-caret {
+  width: 11px;
+  height: 11px;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  color: var(--muted);
+  transform: rotate(45deg) translateY(-2px);
+  transition: transform 0.22s ease, color 0.18s ease;
+  flex: 0 0 auto;
+}
+
+.window-panel.is-open .window-panel-caret {
+  transform: rotate(-135deg) translateY(-1px);
+  color: var(--text);
+}
+
+.window-panel-drawer {
+  position: absolute;
+  top: calc(100% + 10px);
+  left: 0;
+  z-index: 12;
+  width: min(460px, calc(100vw - 32px));
+  max-width: 100%;
+  padding: 0;
+  border: 1px solid color-mix(in srgb, var(--line) 92%, transparent);
+  border-radius: 24px;
+  background: color-mix(in srgb, var(--panel-strong) 94%, transparent);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(18px);
+  overflow: hidden;
+  max-height: 0;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-8px);
+  transition:
+    max-height 0.28s ease,
+    opacity 0.18s ease,
+    transform 0.22s ease,
+    padding 0.22s ease;
+}
+
+.window-panel.is-open .window-panel-drawer {
+  max-height: 360px;
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0);
+  padding: 12px;
+}
+
+.window-panel-grid {
+  display: grid;
+  gap: 10px;
+}
+
+.window-panel-reset {
+  justify-self: start;
 }
 
 .window-readout,
@@ -1076,6 +1181,20 @@ input[type="range"] {
   .controls-inline-secondary {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .window-panel {
+    min-width: 0;
+  }
+
+  .window-panel-drawer {
+    position: static;
+    width: 100%;
+    margin-top: 8px;
+  }
+
+  .window-panel.is-open .window-panel-drawer {
+    max-height: 520px;
   }
 
   .shell {

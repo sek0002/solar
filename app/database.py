@@ -12,6 +12,18 @@ from zoneinfo import ZoneInfo
 
 
 class Database:
+    _POWER_SERIES_META = {
+        "power.solar_kw": ("Solar", "kW"),
+        "power.grid_kw": ("Grid", "kW"),
+        "power.ev_kw": ("BYD EV", "kW"),
+    }
+
+    _POWER_SERIES_SOURCE_MAP = {
+        "local_site": "power.solar_kw",
+        "ble": "power.grid_kw",
+        "byd_ev": "power.ev_kw",
+    }
+
     def __init__(self, path: Path, timezone_name: str = "Australia/Melbourne") -> None:
         self.path = path
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -83,6 +95,33 @@ class Database:
                 ON energy_buckets (granularity, bucket_key)
                 """
             )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS chart_series_meta (
+                    series_key TEXT PRIMARY KEY,
+                    label TEXT NOT NULL,
+                    unit TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+                """
+            )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS chart_points (
+                    series_key TEXT NOT NULL,
+                    observed_at TEXT NOT NULL,
+                    numeric_value REAL,
+                    PRIMARY KEY (series_key, observed_at)
+                )
+                """
+            )
+            connection.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_chart_points_series_observed_at
+                ON chart_points (series_key, observed_at)
+                """
+            )
+            self._ensure_chart_series_meta(connection)
 
     def insert_sample(
         self,
@@ -128,6 +167,14 @@ class Database:
                 grid_usage_watts=grid_usage_watts,
                 solar_generation_watts=solar_generation_watts,
             )
+            self._refresh_power_chart_cache(
+                connection,
+                source=source,
+                observed_at_iso=observed_at_iso,
+                grid_usage_watts=grid_usage_watts,
+                solar_generation_watts=solar_generation_watts,
+                raw_payload=raw_payload,
+            )
 
     @staticmethod
     def _json_default(value: Any) -> Any:
@@ -138,6 +185,81 @@ class Database:
     def get_recent_samples(self, *, hours: int, limit: int) -> list[dict[str, Any]]:
         since = datetime.now(timezone.utc) - timedelta(hours=hours)
         return self.get_samples_range(since=since, until=datetime.now(timezone.utc), limit=limit)
+
+    def get_chart_samples_range(
+        self,
+        *,
+        since: datetime,
+        until: datetime,
+        limit: int,
+    ) -> list[dict[str, Any]]:
+        with self._lock, self._connect() as connection:
+            self._ensure_power_chart_cache(connection, "local_site")
+            self._ensure_power_chart_cache(connection, "ble")
+            self._ensure_power_chart_cache(connection, "byd_ev")
+
+            per_series_limit = max(1, math.ceil(limit / max(1, len(self._POWER_SERIES_META))))
+            rows: list[sqlite3.Row] = []
+            for series_key in self._POWER_SERIES_META:
+                rows.extend(
+                    connection.execute(
+                        """
+                        SELECT series_key, observed_at, numeric_value
+                        FROM (
+                            SELECT series_key, observed_at, numeric_value
+                            FROM chart_points
+                            WHERE series_key = ?
+                              AND observed_at >= ?
+                              AND observed_at <= ?
+                            ORDER BY observed_at DESC
+                            LIMIT ?
+                        ) series_points
+                        ORDER BY observed_at ASC
+                        """,
+                        (
+                            series_key,
+                            since.astimezone(timezone.utc).isoformat(),
+                            until.astimezone(timezone.utc).isoformat(),
+                            per_series_limit,
+                        ),
+                    ).fetchall()
+                )
+
+        items: list[dict[str, Any]] = []
+        for row in sorted(rows, key=lambda item: str(item["observed_at"])):
+            value_kw = float(row["numeric_value"] or 0.0)
+            value_rate = (value_kw * 1000.0) / 60.0
+            if row["series_key"] == "power.solar_kw":
+                items.append(
+                    {
+                        "source": "local_site",
+                        "observed_at": row["observed_at"],
+                        "grid_usage_watts": None,
+                        "solar_generation_watts": value_rate,
+                        "raw_payload": None,
+                    }
+                )
+            elif row["series_key"] == "power.grid_kw":
+                items.append(
+                    {
+                        "source": "ble",
+                        "observed_at": row["observed_at"],
+                        "grid_usage_watts": value_rate,
+                        "solar_generation_watts": None,
+                        "raw_payload": None,
+                    }
+                )
+            elif row["series_key"] == "power.ev_kw":
+                items.append(
+                    {
+                        "source": "byd_ev",
+                        "observed_at": row["observed_at"],
+                        "grid_usage_watts": value_rate,
+                        "solar_generation_watts": None,
+                        "raw_payload": None,
+                    }
+                )
+        return items
 
     def get_samples_range(
         self,
@@ -263,6 +385,45 @@ class Database:
             )
         return grouped
 
+    def get_cumulative_samples_window(
+        self,
+        *,
+        since: datetime,
+        until: datetime,
+    ) -> dict[str, list[dict[str, Any]]]:
+        with self._lock, self._connect() as connection:
+            for source in ("local_site", "ble", "byd_ev"):
+                self._ensure_cumulative_cache(connection, source)
+
+            rows = connection.execute(
+                """
+                SELECT source, observed_at, cumulative_kwh
+                FROM cumulative_samples
+                WHERE source IN ('local_site', 'ble', 'byd_ev')
+                  AND observed_at >= ?
+                  AND observed_at <= ?
+                ORDER BY observed_at ASC
+                """,
+                (
+                    since.astimezone(timezone.utc).isoformat(),
+                    until.astimezone(timezone.utc).isoformat(),
+                ),
+            ).fetchall()
+
+        grouped: dict[str, list[dict[str, Any]]] = {"solar": [], "grid": [], "ev": []}
+        source_map = {"local_site": "solar", "ble": "grid", "byd_ev": "ev"}
+        for row in rows:
+            target = source_map.get(row["source"])
+            if not target:
+                continue
+            grouped[target].append(
+                {
+                    "observed_at": row["observed_at"],
+                    "cumulative_kwh": row["cumulative_kwh"],
+                }
+            )
+        return grouped
+
     def get_energy_summary(self) -> dict[str, Any]:
         with self._lock, self._connect() as connection:
             for source in ("local_site", "ble", "byd_ev"):
@@ -352,6 +513,53 @@ class Database:
 
         self._rebuild_energy_bucket_cache(connection, source)
 
+    def _ensure_chart_series_meta(self, connection: sqlite3.Connection) -> None:
+        now_iso = datetime.now(timezone.utc).isoformat()
+        connection.executemany(
+            """
+            INSERT INTO chart_series_meta (series_key, label, unit, updated_at)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(series_key) DO UPDATE SET
+                label = excluded.label,
+                unit = excluded.unit,
+                updated_at = excluded.updated_at
+            """,
+            [
+                (series_key, label, unit, now_iso)
+                for series_key, (label, unit) in self._POWER_SERIES_META.items()
+            ],
+        )
+
+    def _ensure_power_chart_cache(self, connection: sqlite3.Connection, source: str) -> None:
+        series_key = self._POWER_SERIES_SOURCE_MAP.get(source)
+        if not series_key:
+            return
+        has_samples = connection.execute(
+            """
+            SELECT 1
+            FROM samples
+            WHERE source = ?
+            LIMIT 1
+            """,
+            (source,),
+        ).fetchone()
+        if not has_samples:
+            return
+
+        has_cache = connection.execute(
+            """
+            SELECT 1
+            FROM chart_points
+            WHERE series_key = ?
+            LIMIT 1
+            """,
+            (series_key,),
+        ).fetchone()
+        if has_cache:
+            return
+
+        self._rebuild_power_chart_cache(connection, source)
+
     def _refresh_cumulative_cache(
         self,
         connection: sqlite3.Connection,
@@ -399,6 +607,129 @@ class Database:
 
         if source == "byd_ev":
             self._rebuild_energy_bucket_cache(connection, source)
+
+    def _refresh_power_chart_cache(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        source: str,
+        observed_at_iso: str,
+        grid_usage_watts: Optional[float],
+        solar_generation_watts: Optional[float],
+        raw_payload: Optional[dict[str, Any]] = None,
+    ) -> None:
+        self._ensure_chart_series_meta(connection)
+
+        if source == "local_site":
+            if solar_generation_watts is None:
+                return
+            self._upsert_power_chart_point(connection, "power.solar_kw", observed_at_iso, solar_generation_watts)
+            return
+
+        if source == "ble":
+            if grid_usage_watts is None:
+                return
+            self._upsert_power_chart_point(connection, "power.grid_kw", observed_at_iso, grid_usage_watts)
+            return
+
+        if source == "byd_ev":
+            self._rebuild_power_chart_cache(connection, source)
+
+    def _upsert_power_chart_point(
+        self,
+        connection: sqlite3.Connection,
+        series_key: str,
+        observed_at_iso: str,
+        value_w_per_min: float,
+    ) -> None:
+        connection.execute(
+            """
+            INSERT INTO chart_points (series_key, observed_at, numeric_value)
+            VALUES (?, ?, ?)
+            ON CONFLICT(series_key, observed_at) DO UPDATE SET
+                numeric_value = excluded.numeric_value
+            """,
+            (
+                series_key,
+                observed_at_iso,
+                (float(value_w_per_min) * 60.0) / 1000.0,
+            ),
+        )
+
+    def _rebuild_power_chart_cache(self, connection: sqlite3.Connection, source: str) -> None:
+        series_key = self._POWER_SERIES_SOURCE_MAP.get(source)
+        if not series_key:
+            return
+
+        if source == "local_site":
+            rows = connection.execute(
+                """
+                SELECT observed_at, solar_generation_watts AS value
+                FROM samples
+                WHERE source = 'local_site'
+                  AND solar_generation_watts IS NOT NULL
+                ORDER BY observed_at ASC
+                """
+            ).fetchall()
+            points = [(row["observed_at"], (float(row["value"]) * 60.0) / 1000.0) for row in rows]
+        elif source == "ble":
+            rows = connection.execute(
+                """
+                SELECT observed_at, grid_usage_watts AS value
+                FROM samples
+                WHERE source = 'ble'
+                  AND grid_usage_watts IS NOT NULL
+                ORDER BY observed_at ASC
+                """
+            ).fetchall()
+            points = [(row["observed_at"], (float(row["value"]) * 60.0) / 1000.0) for row in rows]
+        elif source == "byd_ev":
+            rows = connection.execute(
+                """
+                SELECT observed_at, grid_usage_watts, raw_payload
+                FROM samples
+                WHERE source = 'byd_ev'
+                ORDER BY observed_at ASC
+                """
+            ).fetchall()
+            movement_window_seconds = 2 * 60
+            byd_rows: list[dict[str, Any]] = []
+            for row in rows:
+                payload = json.loads(row["raw_payload"]) if row["raw_payload"] else {}
+                byd_rows.append(
+                    {
+                        "observed_at": row["observed_at"],
+                        "observed_dt": self._parse_api_datetime(row["observed_at"]),
+                        "grid_usage_watts": row["grid_usage_watts"],
+                        "raw_payload": payload if isinstance(payload, dict) else {},
+                    }
+                )
+            moving_epochs = [
+                item["observed_dt"].timestamp()
+                for item in byd_rows
+                if (self._get_byd_vehicle_speed_kph(item) or 0) > 0
+            ]
+            points = []
+            for item in byd_rows:
+                charging_rate = self._get_byd_charging_rate(item)
+                suppressed = any(abs(item["observed_dt"].timestamp() - epoch) <= movement_window_seconds for epoch in moving_epochs)
+                if suppressed:
+                    charging_rate = 0.0
+                if charging_rate is None:
+                    continue
+                points.append((item["observed_at"], (float(charging_rate) * 60.0) / 1000.0))
+        else:
+            points = []
+
+        connection.execute("DELETE FROM chart_points WHERE series_key = ?", (series_key,))
+        if points:
+            connection.executemany(
+                """
+                INSERT INTO chart_points (series_key, observed_at, numeric_value)
+                VALUES (?, ?, ?)
+                """,
+                [(series_key, observed_at, numeric_value) for observed_at, numeric_value in points],
+            )
 
     def _append_or_rebuild_cumulative_cache(
         self,

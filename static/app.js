@@ -3,6 +3,10 @@ const windowPreset = document.querySelector("#window-preset");
 const startDateInput = document.querySelector("#start-date");
 const startTimeInput = document.querySelector("#start-time");
 const resetRangeButton = document.querySelector("#reset-range");
+const windowPanel = document.querySelector("#window-panel");
+const windowPanelToggle = document.querySelector("#window-panel-toggle");
+const windowPanelDrawer = document.querySelector("#window-panel-drawer");
+const windowPanelSummary = document.querySelector("#window-panel-summary");
 const statusCards = document.querySelector("#status-cards");
 const collectorStrip = document.querySelector("#collector-strip");
 const latestValues = document.querySelector("#latest-values");
@@ -40,6 +44,7 @@ const uiStateKey = "solar-monitor-ui-state";
 const appCacheVersionKey = "solar-monitor-cache-version";
 const refreshCacheKey = "solar-monitor-last-refresh";
 const appCacheVersion = (window.SOLAR_PWA && window.SOLAR_PWA.appVersion) || "dev";
+const initialDashboardPayload = window.__INITIAL_DASHBOARD__ || null;
 const pageLoadDefaultHours = 12;
 const apiRequestTimeoutMs = 15000;
 const isAndroidDevice = /Android/i.test(navigator.userAgent || "");
@@ -55,6 +60,7 @@ let latestAutomationEnabled = false;
 let latestManualOverrideEnabled = false;
 let deferredSummaryRenderTimer = null;
 let deferredSummaryRenderIdleHandle = null;
+let windowPanelOpen = false;
 
 function scheduleIdleWork(callback, timeoutMs = 1200) {
   if ("requestIdleCallback" in window) {
@@ -322,6 +328,7 @@ function setRangeMode(mode) {
     state.controls = state.controls || {};
     state.controls.rangeMode = mode === "fixed" ? "fixed" : "live";
   });
+  updateWindowPanelSummary();
 }
 
 function syncWindowControls(hours) {
@@ -335,6 +342,7 @@ function syncWindowControls(hours) {
     state.controls = state.controls || {};
     state.controls.hours = clampedHours;
   });
+  updateWindowPanelSummary();
   return clampedHours;
 }
 
@@ -378,6 +386,50 @@ function persistDateTimeControls() {
     state.controls.startDate = startDateInput.value || "";
     state.controls.startTime = startTimeInput.value || "";
   });
+  updateWindowPanelSummary();
+}
+
+function formatWindowPanelSummary() {
+  const hours = clampHours(hoursInput.value || window.SOLAR_MONITOR_CONFIG.defaultHours || 24);
+  if (!isFixedRange()) {
+    return `${hours}h live`;
+  }
+  if (!startDateInput.value) {
+    return `${hours}h custom`;
+  }
+  const customStart = buildAppDateTime(startDateInput.value, startTimeInput.value || "00:00");
+  const dateLabel = Number.isNaN(customStart.getTime())
+    ? startDateInput.value
+    : customStart.toLocaleString("en-AU", {
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+      timeZone: appTimezone
+    });
+  return `${hours}h from ${dateLabel}`;
+}
+
+function updateWindowPanelSummary() {
+  if (!windowPanelSummary) {
+    return;
+  }
+  windowPanelSummary.textContent = formatWindowPanelSummary();
+}
+
+function setWindowPanelOpen(nextOpen) {
+  windowPanelOpen = Boolean(nextOpen);
+  if (!windowPanel) {
+    return;
+  }
+  windowPanel.classList.toggle("is-open", windowPanelOpen);
+  if (windowPanelToggle) {
+    windowPanelToggle.setAttribute("aria-expanded", windowPanelOpen ? "true" : "false");
+  }
+  if (windowPanelDrawer) {
+    windowPanelDrawer.setAttribute("aria-hidden", windowPanelOpen ? "false" : "true");
+  }
 }
 
 function buildChartTheme() {
@@ -2249,6 +2301,17 @@ function loadRefreshCache() {
   }
 }
 
+function getUsableDashboardPayload(request) {
+  const cachedPayload = loadRefreshCache();
+  if (isCachedRefreshUsable(cachedPayload, request)) {
+    return cachedPayload;
+  }
+  if (isCachedRefreshUsable(initialDashboardPayload, request)) {
+    return initialDashboardPayload;
+  }
+  return null;
+}
+
 function saveRefreshCache(payload) {
   try {
     safeSessionStorageSet(refreshCacheKey, JSON.stringify(payload));
@@ -2352,7 +2415,7 @@ function renderDashboardState(statusPayload, items, cumulativeSeries, energySumm
 
 function renderCachedDashboardIfAvailable(hours, safeStart, end) {
   const request = buildRefreshRequest(hours, safeStart, end);
-  const cachedPayload = loadRefreshCache();
+  const cachedPayload = getUsableDashboardPayload(request);
   if (!isCachedRefreshUsable(cachedPayload, request)) {
     return false;
   }
@@ -2373,6 +2436,7 @@ function renderCachedDashboardIfAvailable(hours, safeStart, end) {
     buildWindowState(safeStart, end),
     `Showing cached data from ${new Date(cachedPayload.cachedAt).toLocaleTimeString("en-AU", { timeZone: appTimezone })}`
   );
+  saveRefreshCache(cachedPayload);
   return true;
 }
 
@@ -2396,7 +2460,7 @@ async function refresh() {
     const request = buildRefreshRequest(hours, safeStart, end);
     const fetchLimit = getSamplesFetchLimit(hours);
     const samplesTargetPoints = getSamplesTargetPoints(hours);
-    const cachedPayload = loadRefreshCache();
+    const cachedPayload = getUsableDashboardPayload(request);
     const fallbackItems = Array.isArray(cachedPayload && cachedPayload.items) ? cachedPayload.items : [];
     const fallbackCumulativeSeries = cachedPayload && cachedPayload.cumulativeSeries
       ? cachedPayload.cumulativeSeries
@@ -2405,46 +2469,41 @@ async function refresh() {
       ? cachedPayload.energySummary
       : buildEmptyEnergySummary();
 
-    const statusPayload = await fetchJson("/api/status");
-    renderDashboardChrome(statusPayload);
-    refreshText.textContent = fallbackItems.length
-      ? `Refreshing from ${new Date().toLocaleTimeString("en-AU", { timeZone: appTimezone })}...`
-      : "Loading charts...";
-
-    const [samplesResult, cumulativeResult, energySummaryResult] = await Promise.allSettled([
-      fetchJson(`/api/samples?hours=${hours}&limit=${fetchLimit}&target_points=${samplesTargetPoints}&start=${encodeURIComponent(safeStart.toISOString())}&end=${encodeURIComponent(end.toISOString())}`),
-      fetchJson("/api/cumulative"),
-      fetchJson("/api/energy-summary")
-    ]);
-
-    if (samplesResult.status !== "fulfilled") {
-      throw samplesResult.reason || new Error("Unable to load dashboard samples");
+    const statusPayload = cachedPayload && cachedPayload.statusPayload
+      ? cachedPayload.statusPayload
+      : null;
+    if (statusPayload) {
+      renderDashboardChrome(statusPayload);
+      refreshText.textContent = fallbackItems.length
+        ? `Refreshing from ${new Date().toLocaleTimeString("en-AU", { timeZone: appTimezone })}...`
+        : "Loading charts...";
     }
 
-    const samplesPayload = samplesResult.value;
-    const cumulativePayload = cumulativeResult.status === "fulfilled" ? cumulativeResult.value : { items: fallbackCumulativeSeries };
-    const energySummary = energySummaryResult.status === "fulfilled"
-      ? energySummaryResult.value
+    const dashboardPayload = await fetchJson(
+      `/api/dashboard?mode=${encodeURIComponent(request.mode)}&hours=${hours}&limit=${fetchLimit}&target_points=${samplesTargetPoints}&start=${encodeURIComponent(safeStart.toISOString())}&end=${encodeURIComponent(end.toISOString())}`
+    );
+    const nextStatusPayload = dashboardPayload && dashboardPayload.statusPayload ? dashboardPayload.statusPayload : statusPayload;
+    if (nextStatusPayload) {
+      renderDashboardChrome(nextStatusPayload);
+    }
+    const energySummary = dashboardPayload && dashboardPayload.energySummary
+      ? dashboardPayload.energySummary
       : fallbackEnergySummary;
-    const items = Array.isArray(samplesPayload.items) ? samplesPayload.items : [];
-    const cumulativeSeries = cumulativePayload && cumulativePayload.items ? cumulativePayload.items : { solar: [], grid: [], ev: [] };
+    const items = dashboardPayload && Array.isArray(dashboardPayload.items) ? dashboardPayload.items : [];
+    const cumulativeSeries = dashboardPayload && dashboardPayload.cumulativeSeries
+      ? dashboardPayload.cumulativeSeries
+      : fallbackCumulativeSeries;
 
     saveRefreshCache({
-      request,
-      cachedAt: new Date().toISOString(),
-      statusPayload,
+      request: dashboardPayload && dashboardPayload.request ? dashboardPayload.request : request,
+      cachedAt: dashboardPayload && dashboardPayload.cachedAt ? dashboardPayload.cachedAt : new Date().toISOString(),
+      statusPayload: nextStatusPayload,
       items,
       cumulativeSeries,
       energySummary
     });
-    if (cumulativeResult.status === "rejected") {
-      console.warn("Unable to load cumulative series", cumulativeResult.reason);
-    }
-    if (energySummaryResult.status === "rejected") {
-      console.warn("Unable to load energy summary", energySummaryResult.reason);
-    }
     renderDashboardState(
-      statusPayload,
+      nextStatusPayload,
       items,
       cumulativeSeries,
       energySummary,
@@ -2495,6 +2554,7 @@ if (isFixedRange()) {
   applyDefaultStartDateTime(hoursInput.value || pageLoadDefaultHours);
 }
 bindStatusCardPersistence();
+updateWindowPanelSummary();
 
 {
   const hours = syncWindowControls(hoursInput.value || window.SOLAR_MONITOR_CONFIG.defaultHours || 24);
@@ -2505,6 +2565,28 @@ bindStatusCardPersistence();
   const end = new Date(usableStart.getTime() + hours * 3600000);
   renderCachedDashboardIfAvailable(hours, usableStart, end);
 }
+
+if (windowPanelToggle) {
+  windowPanelToggle.addEventListener("click", () => {
+    setWindowPanelOpen(!windowPanelOpen);
+  });
+}
+
+document.addEventListener("click", (event) => {
+  if (!windowPanelOpen || !windowPanel) {
+    return;
+  }
+  if (windowPanel.contains(event.target)) {
+    return;
+  }
+  setWindowPanelOpen(false);
+});
+
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && windowPanelOpen) {
+    setWindowPanelOpen(false);
+  }
+});
 
 themeToggle.addEventListener("click", () => {
   const nextTheme = getTheme() === "dark" ? "light" : "dark";
@@ -2517,6 +2599,7 @@ windowPreset.addEventListener("change", () => {
     setRangeMode("live");
     syncWindowControls(windowPreset.value);
     applyDefaultStartDateTime(windowPreset.value);
+    setWindowPanelOpen(false);
     scheduleRefresh(0);
   }
 });
@@ -2551,6 +2634,7 @@ resetRangeButton.addEventListener("click", () => {
   setRangeMode("live");
   applyDefaultStartDateTime(hoursInput.value || window.SOLAR_MONITOR_CONFIG.defaultHours || 24);
   resetStoredChartState();
+  setWindowPanelOpen(false);
   scheduleRefresh(0);
 });
 

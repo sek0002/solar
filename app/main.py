@@ -743,6 +743,59 @@ def _downsample_samples(items: list[dict[str, object]], target_points: int) -> l
     return sorted(reduced, key=lambda item: str(item.get("observed_at") or ""))
 
 
+def _resolve_dashboard_window(
+    *,
+    hours: int,
+    start: str | None,
+    end: str | None,
+) -> tuple[datetime, datetime]:
+    fallback_end = datetime.now(timezone.utc)
+    end_dt = _parse_api_datetime(end, fallback_end)
+    start_dt = _parse_api_datetime(start, end_dt - timedelta(hours=hours))
+    if start_dt > end_dt:
+        start_dt, end_dt = end_dt - timedelta(hours=hours), end_dt
+    return start_dt, end_dt
+
+
+async def _build_dashboard_payload(
+    *,
+    mode: str,
+    hours: int,
+    limit: int,
+    target_points: int,
+    start: str | None = None,
+    end: str | None = None,
+) -> dict[str, object]:
+    start_dt, end_dt = _resolve_dashboard_window(hours=hours, start=start, end=end)
+    status_payload = await _build_status_payload()
+    chart_items = database.get_chart_samples_range(since=start_dt, until=end_dt, limit=limit)
+    downsampled_items = _downsample_samples(chart_items, target_points or 0)
+
+    energy_summary = _get_cached_payload(_ENERGY_SUMMARY_CACHE)
+    if energy_summary is None:
+        energy_summary = _set_cached_payload(
+            _ENERGY_SUMMARY_CACHE,
+            database.get_energy_summary(),
+            AGGREGATE_CACHE_TTL_SECONDS,
+        )
+
+    cumulative_series = database.get_cumulative_samples_window(since=start_dt, until=end_dt)
+
+    return {
+        "request": {
+            "mode": mode,
+            "hours": hours,
+            "start": start_dt.isoformat(),
+            "end": end_dt.isoformat(),
+        },
+        "cachedAt": datetime.now(timezone.utc).isoformat(),
+        "statusPayload": status_payload,
+        "items": downsampled_items,
+        "cumulativeSeries": cumulative_series,
+        "energySummary": energy_summary,
+    }
+
+
 def _format_byd_page_value(value: object, suffix: str = "") -> str:
     if value is None or value == "":
         return "-"
@@ -1390,6 +1443,12 @@ async def index(request: Request) -> HTMLResponse:
     byd_payload = dict(byd_sample.get("raw_payload") or {}) if byd_sample else {}
     byd_latitude, byd_longitude = _extract_gps_coordinates(byd_payload.get("gps") or {})
     byd_map_embed_url = _build_map_embed_url(byd_latitude, byd_longitude)
+    initial_dashboard = await _build_dashboard_payload(
+        mode="live",
+        hours=settings.api_default_hours,
+        limit=min(settings.api_max_points, 8000),
+        target_points=1200,
+    )
     return templates.TemplateResponse(
         request,
         "index.html",
@@ -1408,6 +1467,7 @@ async def index(request: Request) -> HTMLResponse:
             "byd_map_embed_url": byd_map_embed_url,
             "byd_map_latitude": byd_latitude,
             "byd_map_longitude": byd_longitude,
+            "initial_dashboard": initial_dashboard,
         },
     )
 
@@ -1432,21 +1492,38 @@ async def api_samples(
     target_points: Optional[int] = Query(default=None, ge=100, le=5000),
 ) -> dict[str, object]:
     if start or end:
-        fallback_end = datetime.now(timezone.utc)
-        end_dt = _parse_api_datetime(end, fallback_end)
-        start_dt = _parse_api_datetime(start, end_dt - timedelta(hours=hours))
-        if start_dt > end_dt:
-            start_dt, end_dt = end_dt - timedelta(hours=hours), end_dt
-        items = database.get_samples_range(since=start_dt, until=end_dt, limit=limit)
+        start_dt, end_dt = _resolve_dashboard_window(hours=hours, start=start, end=end)
+        items = database.get_chart_samples_range(since=start_dt, until=end_dt, limit=limit)
         return {"items": _downsample_samples(items, target_points or 0)}
 
-    items = database.get_recent_samples(hours=hours, limit=limit)
+    end_dt = datetime.now(timezone.utc)
+    start_dt = end_dt - timedelta(hours=hours)
+    items = database.get_chart_samples_range(since=start_dt, until=end_dt, limit=limit)
     return {"items": _downsample_samples(items, target_points or 0)}
 
 
 @app.get("/api/status")
 async def api_status() -> dict[str, object]:
     return await _build_status_payload()
+
+
+@app.get("/api/dashboard")
+async def api_dashboard(
+    mode: str = Query(default="live", pattern="^(live|fixed)$"),
+    hours: int = Query(default=settings.api_default_hours, ge=1, le=24 * 30),
+    limit: int = Query(default=settings.api_max_points, ge=1, le=20000),
+    start: Optional[str] = Query(default=None),
+    end: Optional[str] = Query(default=None),
+    target_points: int = Query(default=1200, ge=100, le=5000),
+) -> dict[str, object]:
+    return await _build_dashboard_payload(
+        mode=mode,
+        hours=hours,
+        limit=limit,
+        target_points=target_points,
+        start=start,
+        end=end,
+    )
 
 
 @app.get("/api/cumulative")
