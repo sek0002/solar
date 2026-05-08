@@ -24,6 +24,12 @@ class Database:
         "byd_ev": "power.ev_kw",
     }
 
+    _SOURCE_BY_POWER_SERIES = {
+        "power.solar_kw": "local_site",
+        "power.grid_kw": "ble",
+        "power.ev_kw": "byd_ev",
+    }
+
     def __init__(self, path: Path, timezone_name: str = "Australia/Melbourne") -> None:
         self.path = path
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -199,30 +205,33 @@ class Database:
             self._ensure_power_chart_cache(connection, "byd_ev")
 
             per_series_limit = max(1, math.ceil(limit / max(1, len(self._POWER_SERIES_META))))
-            rows: list[sqlite3.Row] = []
-            for series_key in self._POWER_SERIES_META:
-                rows.extend(
-                    connection.execute(
-                        """
-                        SELECT series_key, observed_at, numeric_value
-                        FROM (
-                            SELECT series_key, observed_at, numeric_value
-                            FROM chart_points
-                            WHERE series_key = ?
-                              AND observed_at >= ?
-                              AND observed_at <= ?
-                            ORDER BY observed_at DESC
-                            LIMIT ?
-                        ) series_points
-                        ORDER BY observed_at ASC
-                        """,
-                        (
-                            series_key,
-                            since.astimezone(timezone.utc).isoformat(),
-                            until.astimezone(timezone.utc).isoformat(),
-                            per_series_limit,
-                        ),
-                    ).fetchall()
+            rows = self._query_chart_series_rows(
+                connection,
+                since=since,
+                until=until,
+                per_series_limit=per_series_limit,
+            )
+            counts_by_series: dict[str, int] = {}
+            for row in rows:
+                series_key = str(row["series_key"])
+                counts_by_series[series_key] = counts_by_series.get(series_key, 0) + 1
+
+            missing_series = [
+                series_key
+                for series_key in self._POWER_SERIES_META
+                if counts_by_series.get(series_key, 0) < 2
+            ]
+            for series_key in missing_series:
+                source = self._SOURCE_BY_POWER_SERIES.get(series_key)
+                if source:
+                    self._rebuild_power_chart_cache(connection, source)
+
+            if missing_series:
+                rows = self._query_chart_series_rows(
+                    connection,
+                    since=since,
+                    until=until,
+                    per_series_limit=per_series_limit,
                 )
 
         items: list[dict[str, Any]] = []
@@ -260,6 +269,41 @@ class Database:
                     }
                 )
         return items
+
+    def _query_chart_series_rows(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        since: datetime,
+        until: datetime,
+        per_series_limit: int,
+    ) -> list[sqlite3.Row]:
+        rows: list[sqlite3.Row] = []
+        for series_key in self._POWER_SERIES_META:
+            rows.extend(
+                connection.execute(
+                    """
+                    SELECT series_key, observed_at, numeric_value
+                    FROM (
+                        SELECT series_key, observed_at, numeric_value
+                        FROM chart_points
+                        WHERE series_key = ?
+                          AND observed_at >= ?
+                          AND observed_at <= ?
+                        ORDER BY observed_at DESC
+                        LIMIT ?
+                    ) series_points
+                    ORDER BY observed_at ASC
+                    """,
+                    (
+                        series_key,
+                        since.astimezone(timezone.utc).isoformat(),
+                        until.astimezone(timezone.utc).isoformat(),
+                        per_series_limit,
+                    ),
+                ).fetchall()
+            )
+        return rows
 
     def get_samples_range(
         self,
