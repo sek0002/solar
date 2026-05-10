@@ -22,52 +22,6 @@
     <section class="topbar">
       <div class="controls-inline">
         <div class="controls-inline-primary">
-          <div id="window-panel" class="window-panel">
-            <button
-              id="window-panel-toggle"
-              class="window-panel-toggle"
-              type="button"
-              aria-expanded="false"
-              aria-controls="window-panel-drawer"
-            >
-              <span class="window-panel-toggle-copy">
-                <span class="window-panel-toggle-label">Chart window</span>
-                <strong id="window-panel-summary" class="window-panel-summary">24h live</strong>
-              </span>
-              <span class="window-panel-caret" aria-hidden="true"></span>
-            </button>
-            <div id="window-panel-drawer" class="window-panel-drawer" aria-hidden="true">
-              <div class="window-panel-grid">
-                <div class="controls">
-                  <label for="hours">Window</label>
-                  <div class="window-readout">
-                    <select id="window-preset" aria-label="Window preset">
-                      <option value="1">1 hour</option>
-                      <option value="6">6 hours</option>
-                      <option value="12">12 hours</option>
-                      <option value="24" selected>24 hours</option>
-                      <option value="48">48 hours</option>
-                      <option value="72">72 hours</option>
-                      <option value="168">7 days</option>
-                      <option value="custom">Custom</option>
-                    </select>
-                    <input id="hours" type="number" min="1" max="168" step="1" value="24">
-                    <span>hours</span>
-                  </div>
-                </div>
-                <div class="controls">
-                  <label for="start-date">Start</label>
-                  <div class="datetime-controls">
-                    <input id="start-date" type="date">
-                    <input id="start-time" type="time" step="60">
-                  </div>
-                </div>
-                <button id="reset-range" class="theme-toggle window-panel-reset" type="button" aria-label="Reset start time">
-                  Reset window
-                </button>
-              </div>
-            </div>
-          </div>
           <nav class="page-tabs topbar-tabs topbar-switch" aria-label="Pages">
             <a class="page-tab is-active" href="/">Dashboard</a>
             <a class="page-tab" href="/byd">BYD</a>
@@ -155,6 +109,63 @@
         <div>
           <h2>Live energy charts</h2>
           <span>BLE, site solar, and BYD EV share one chart, with cumulative energy beside it.</span>
+        </div>
+        <div id="window-panel" class="window-panel panel-header-window">
+          <button
+            id="window-panel-toggle"
+            class="window-panel-toggle"
+            type="button"
+            aria-expanded="false"
+            aria-controls="window-panel-drawer"
+          >
+            <span class="window-panel-toggle-copy">
+              <span class="window-panel-toggle-label">Chart window</span>
+              <strong id="window-panel-summary" class="window-panel-summary">24h live</strong>
+            </span>
+            <span class="window-panel-caret" aria-hidden="true"></span>
+          </button>
+          <div id="window-panel-drawer" class="window-panel-drawer" aria-hidden="true">
+            <div class="window-panel-grid">
+              <div class="controls">
+                <label for="hours">Window</label>
+                <div class="window-readout">
+                  <select id="window-preset" aria-label="Window preset">
+                    <option value="1">1 hour</option>
+                    <option value="6">6 hours</option>
+                    <option value="12">12 hours</option>
+                    <option value="24" selected>24 hours</option>
+                    <option value="48">48 hours</option>
+                    <option value="72">72 hours</option>
+                    <option value="168">7 days</option>
+                    <option value="custom">Custom</option>
+                  </select>
+                  <input id="hours" type="number" min="1" max="168" step="1" value="24">
+                  <span>hours</span>
+                </div>
+                <div class="window-slider">
+                  <div class="window-slider-meta">
+                    <span>Drag to adjust</span>
+                    <strong id="hours-slider-value">24h</strong>
+                  </div>
+                  <input id="hours-slider" type="range" min="1" max="168" step="1" value="24" aria-label="Window hours slider">
+                  <div class="window-slider-scale" aria-hidden="true">
+                    <span>1h</span>
+                    <span>7d</span>
+                  </div>
+                </div>
+              </div>
+              <div class="controls">
+                <label for="start-date">Start</label>
+                <div class="datetime-controls">
+                  <input id="start-date" type="date">
+                  <input id="start-time" type="time" step="60">
+                </div>
+              </div>
+              <button id="reset-range" class="theme-toggle window-panel-reset" type="button" aria-label="Reset start time">
+                Reset window
+              </button>
+            </div>
+          </div>
         </div>
       </div>
       <div class="charts-grid charts-grid-two charts-grid-nested">

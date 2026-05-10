@@ -1,4 +1,6 @@
 const hoursInput = document.querySelector("#hours");
+const hoursSlider = document.querySelector("#hours-slider");
+const hoursSliderValue = document.querySelector("#hours-slider-value");
 const windowPreset = document.querySelector("#window-preset");
 const startDateInput = document.querySelector("#start-date");
 const startTimeInput = document.querySelector("#start-time");
@@ -334,6 +336,12 @@ function setRangeMode(mode) {
 function syncWindowControls(hours) {
   const clampedHours = clampHours(hours);
   hoursInput.value = clampedHours;
+  if (hoursSlider) {
+    hoursSlider.value = clampedHours;
+  }
+  if (hoursSliderValue) {
+    hoursSliderValue.textContent = `${clampedHours}h`;
+  }
   if (windowPreset) {
     const presetValues = Array.from(windowPreset.options).map((option) => option.value);
     windowPreset.value = presetValues.includes(String(clampedHours)) ? String(clampedHours) : "custom";
@@ -2616,6 +2624,21 @@ hoursInput.addEventListener("change", () => {
   applyDefaultStartDateTime(hoursInput.value);
   scheduleRefresh(0);
 });
+
+if (hoursSlider) {
+  hoursSlider.addEventListener("input", () => {
+    setRangeMode("live");
+    syncWindowControls(hoursSlider.value);
+    applyDefaultStartDateTime(hoursSlider.value);
+    scheduleRefresh(200);
+  });
+  hoursSlider.addEventListener("change", () => {
+    setRangeMode("live");
+    syncWindowControls(hoursSlider.value);
+    applyDefaultStartDateTime(hoursSlider.value);
+    scheduleRefresh(0);
+  });
+}
 
 [startDateInput, startTimeInput].forEach((input) => {
   input.addEventListener("input", () => {
