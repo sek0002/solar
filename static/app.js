@@ -63,6 +63,8 @@ let latestManualOverrideEnabled = false;
 let deferredSummaryRenderTimer = null;
 let deferredSummaryRenderIdleHandle = null;
 let windowPanelOpen = false;
+let lastSliderRefreshAt = 0;
+let sliderRefreshTimer = null;
 
 function scheduleIdleWork(callback, timeoutMs = 1200) {
   if ("requestIdleCallback" in window) {
@@ -2546,6 +2548,25 @@ function scheduleRefresh(delay = 150) {
   }, delay);
 }
 
+function scheduleSliderLiveRefresh() {
+  const minIntervalMs = 120;
+  const now = Date.now();
+  const elapsed = now - lastSliderRefreshAt;
+  if (elapsed >= minIntervalMs) {
+    lastSliderRefreshAt = now;
+    scheduleRefresh(0);
+    return;
+  }
+  if (sliderRefreshTimer) {
+    return;
+  }
+  sliderRefreshTimer = window.setTimeout(() => {
+    sliderRefreshTimer = null;
+    lastSliderRefreshAt = Date.now();
+    scheduleRefresh(0);
+  }, minIntervalMs - elapsed);
+}
+
 const storedTheme = safeLocalStorageGet("solar-monitor-theme");
 setTheme(storedTheme || "light");
 if (isFixedRange() && uiState.controls && uiState.controls.startDate) {
@@ -2630,7 +2651,7 @@ if (hoursSlider) {
     setRangeMode("live");
     syncWindowControls(hoursSlider.value);
     applyDefaultStartDateTime(hoursSlider.value);
-    scheduleRefresh(200);
+    scheduleSliderLiveRefresh();
   });
   hoursSlider.addEventListener("change", () => {
     setRangeMode("live");
